@@ -25,18 +25,36 @@ type Checker struct {
 	sel      *selector.Selector
 	settings atomic.Pointer[Settings]
 
+	trigger   chan struct{} // coalesced request for an out-of-band cycle
+	lastCycle atomic.Int64  // unixnano of the last cycle start
+
 	// OnSwitch, if set, is called when the active upstream changes.
 	OnSwitch func(from, to *upstream.Upstream)
 }
 
 func New(sel *selector.Selector, s Settings) *Checker {
-	c := &Checker{sel: sel}
+	c := &Checker{sel: sel, trigger: make(chan struct{}, 1)}
 	c.settings.Store(&s)
 	return c
 }
 
 // SetSettings swaps the check settings (used on config reload).
 func (c *Checker) SetSettings(s Settings) { c.settings.Store(&s) }
+
+// Trigger requests an out-of-band check cycle, e.g. after a frontend dial
+// error. Calls within the check timeout window are ignored to avoid hammering
+// upstreams, and concurrent requests coalesce into a single cycle.
+func (c *Checker) Trigger() {
+	s := c.settings.Load()
+	last := c.lastCycle.Load()
+	if last != 0 && time.Since(time.Unix(0, last)) < s.Timeout {
+		return
+	}
+	select {
+	case c.trigger <- struct{}{}:
+	default:
+	}
+}
 
 // Run blocks until ctx is cancelled, probing on each interval.
 func (c *Checker) Run(ctx context.Context) {
@@ -46,6 +64,8 @@ func (c *Checker) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-c.trigger:
+			c.cycle(ctx)
 		case <-time.After(s.Interval):
 			c.cycle(ctx)
 		}
@@ -53,6 +73,7 @@ func (c *Checker) Run(ctx context.Context) {
 }
 
 func (c *Checker) cycle(ctx context.Context) {
+	c.lastCycle.Store(time.Now().UnixNano())
 	s := c.settings.Load()
 	ups := c.sel.Upstreams()
 

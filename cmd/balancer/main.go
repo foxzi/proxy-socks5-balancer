@@ -44,12 +44,19 @@ func main() {
 	}
 
 	// Dial function used by both frontends: route through the active upstream.
+	// A dial failure pokes the checker to re-probe out of band, so a dead
+	// upstream is detected without waiting for the next interval.
 	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		cur := sel.Current()
 		if cur == nil {
 			return nil, fmt.Errorf("no healthy upstream available")
 		}
-		return cur.DialContext(ctx, network, addr)
+		conn, err := cur.DialContext(ctx, network, addr)
+		if err != nil {
+			chk.Trigger()
+			return nil, err
+		}
+		return conn, nil
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
