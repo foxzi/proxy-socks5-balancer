@@ -26,7 +26,7 @@ browser / program     |
   status :10802
 ```
 
-The checker probes all upstreams every `interval`. The selector keeps a single active upstream: among the healthy upstreams in the best (lowest) `priority` tier, the one with the lowest latency (divided by `weight`). It switches only when the current one becomes unhealthy or another healthy one is faster by more than `switch_margin`. Every inbound connection is forwarded through the active upstream. If no upstream is healthy, new connections fail with `no healthy upstream available`.
+The checker probes all upstreams every `interval`. The selector keeps a single active upstream: among the healthy upstreams in the best (lowest) `priority` tier, the one with the lowest latency (divided by `weight`). It switches only when the current one becomes unhealthy, another healthy one in the same tier is faster by more than `switch_margin`, or a healthy upstream appears in a better (lower-number) tier. The tier change preempts immediately, regardless of `switch_margin`; the margin applies only when choosing among upstreams within the same tier. Every inbound connection is forwarded through the active upstream. If no upstream is healthy, new connections fail with `no healthy upstream available`.
 
 Passive health: when a frontend fails to dial through the active upstream, the balancer triggers an out-of-band health re-check instead of waiting for the next `interval`. The re-check is rate-limited by `check.timeout` and coalesced. A dial failure does not mark the upstream down by itself, so a single bad target host cannot eject a healthy upstream.
 
@@ -103,7 +103,7 @@ Packaging layout is defined in `nfpm.yaml`; maintainer scripts live in `deploy/s
 | `upstreams[].name` | none (required) | Unique upstream name |
 | `upstreams[].socks5` | none (required) | Upstream SOCKS5 address |
 | `upstreams[].priority` | `0` | Lower value wins; only healthy upstreams in the best (lowest) tier are used, higher-number tiers are standby/failover |
-| `upstreams[].weight` | `1` | Must be >= 1; a higher weight divides the measured latency for selection, so the upstream is preferred within its tier |
+| `upstreams[].weight` | `1` | Defaults to 1; `0` is accepted and treated as 1, a negative value is rejected. A higher weight divides the measured latency for selection, so the upstream is preferred within its tier |
 
 `latency_ewma` smooths the measured latency over time to reduce selection flapping: `smoothed = ewma*new + (1-ewma)*old`. A value like `0.3` is a reasonable start.
 
@@ -124,7 +124,7 @@ The status server also exposes:
 kill -HUP <pid>
 ```
 
-Reloads the config file and swaps upstreams, margin and check settings live. Listen addresses are not rebound. SIGINT/SIGTERM shut the service down gracefully.
+Reloads the config file and swaps upstreams, margin, check settings (`interval`, `timeout`, `required`, `urls`, `up_threshold`, `down_threshold`, `latency_ewma`) and the `on_switch` hook live. Listen addresses are not rebound. Because upstreams are rebuilt, all of them start as unhealthy and the active selection is dropped; the balancer re-probes on the next check cycle, so for up to one `interval` new connections may fail with `no healthy upstream available`. SIGINT/SIGTERM shut the service down gracefully.
 
 ## On-switch hook
 
@@ -147,10 +147,11 @@ cmd/balancer/main.go    entrypoint, flags, wiring, signal handling
 internal/config         config loading and validation
 internal/upstream       upstream model, health state, SOCKS5 dialing
 internal/checker        periodic probing
-internal/selector       min-latency selection with switch margin
+internal/selector       priority-tier + weighted min-latency selection with switch margin
 internal/frontend       inbound SOCKS5 and HTTP proxy servers
 internal/status         status web page, JSON, /metrics and /healthz
 internal/metrics        runtime counters for /metrics
-deploy/                 systemd unit
+internal/hook           on_switch command hook
+deploy/                 systemd unit, packaging scripts, build-packages.sh
 docs/                   full documentation (en, ru)
 ```

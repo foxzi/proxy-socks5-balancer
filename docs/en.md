@@ -49,6 +49,7 @@ Components:
 - `internal/frontend`: inbound SOCKS5 and HTTP proxy servers.
 - `internal/status`: status web page, JSON endpoint, Prometheus `/metrics` and `/healthz`.
 - `internal/metrics`: runtime counters exposed by `/metrics`.
+- `internal/hook`: the `on_switch` command hook run when the active upstream changes.
 
 Both frontends use the same dial function: it asks the selector for the current upstream and dials the target through that upstream's SOCKS5. If there is no active upstream, the dial fails with `no healthy upstream available`. If dialing through the active upstream fails, the checker is asked to re-check out of band (see "Passive health" in section 4).
 
@@ -114,7 +115,7 @@ Listen addresses are read at startup. They are not changed by a config reload; t
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `log.level` | `info` | Verbosity: `debug`, `info`, `warn`, `error`. `debug` logs each upstream's result every check cycle. |
-| `log.format` | `text` | Output format: `text` or `json`. Logs go to stdout with no timestamp prefix, so journald adds its own. |
+| `log.format` | `text` | Output format: `text` or `json`. Logs go to stdout and include a timestamp (`time=` in text, `"time"` in json), so they are suitable for journald. |
 
 Log level and format are applied at startup only; a reload does not change them.
 
@@ -140,7 +141,7 @@ A list of local SOCKS5 proxies. At least one is required.
 | `upstreams[].name` | none | Unique name, shown on the status page. Must not be empty. |
 | `upstreams[].socks5` | none | Address of the upstream SOCKS5 proxy (`host:port`). Must not be empty. |
 | `upstreams[].priority` | `0` | Integer; lower value wins. Only healthy upstreams in the best (lowest) available priority tier are used for selection; higher-number tiers act as standby/failover. |
-| `upstreams[].weight` | `1` | Integer, must be >= 1. A higher weight divides the measured latency for selection purposes, making the upstream look faster, so it is preferred within its tier. |
+| `upstreams[].weight` | `1` | Integer, defaults to 1; `0` is accepted and treated as 1, a negative value is rejected. A higher weight divides the measured latency for selection purposes, making the upstream look faster, so it is preferred within its tier. |
 
 ### on_switch
 
@@ -218,7 +219,8 @@ The strategy is priority tiers, then minimum latency with a switch margin.
 The active upstream is the one with the lowest (weight-adjusted) latency in that tier, but to avoid flapping between proxies of similar speed, the selector switches only when:
 
 1. the current upstream becomes unhealthy, or
-2. another healthy upstream is faster than the current one by more than `switch_margin`.
+2. another healthy upstream in the same tier is faster than the current one by more than `switch_margin`, or
+3. a healthy upstream appears in a better (lower-number) priority tier. It preempts immediately, regardless of `switch_margin`; the margin applies only when choosing among upstreams within the same tier.
 
 If no upstream is healthy, there is no active upstream and new connections fail with `no healthy upstream available`.
 
@@ -266,8 +268,7 @@ A minimal inbound SOCKS5 server: no authentication, CONNECT command only.
 | Health | up or down |
 | Latency | Average latency of successful requests, `-` if not measured |
 | OK/Total | Successful requests out of all check URLs in the last cycle |
-| Checked | Time since the last check, `never` if not checked yet |
-| Last error | Last error, if any |
+| Checked | Time since the last check, `never` if not checked yet; the last error, if any, is shown under this value |
 
 `http://<listen.status>/status.json` returns the same data as a JSON array, one object per upstream:
 
@@ -320,8 +321,8 @@ curl -s http://127.0.0.1:10802/status.json
 | Metric | Type | Labels | Meaning |
 |--------|------|--------|---------|
 | `balancer_switches_total` | counter | none | Active upstream changes |
-| `balancer_frontend_dial_errors_total` | counter | none | Failed dials to the active upstream (both frontends) |
-| `balancer_frontend_connections_total` | counter | `frontend` (`socks5`, `http`) | Accepted frontend connections |
+| `balancer_frontend_dial_errors_total` | counter | none | Failed dials to the active upstream (both frontends); also incremented on plain-HTTP RoundTrip errors, not only on dial failures |
+| `balancer_frontend_connections_total` | counter | `frontend` (`socks5`, `http`) | `socks5`: accepted connections; `http`: HTTP requests (incremented per request, so keep-alive connections inflate it) |
 | `balancer_frontend_active_connections` | gauge | `frontend` (`socks5`, `http`) | Open frontend connections |
 | `balancer_upstream_up` | gauge | `name` | 1 if the upstream is healthy, 0 if down |
 | `balancer_upstream_latency_ms` | gauge | `name` | Last measured latency in milliseconds |
@@ -350,7 +351,7 @@ curl -fs http://127.0.0.1:10802/healthz
 
 | Signal | Action |
 |--------|--------|
-| `SIGHUP` | Reload the config file. Upstreams, `switch_margin` and check settings (`interval`, `timeout`, `required`, `urls`) are swapped live; the listeners are not restarted and listen addresses are not changed. If the new config is invalid, the error is logged and the current configuration stays. |
+| `SIGHUP` | Reload the config file. Upstreams, `switch_margin`, check settings (`interval`, `timeout`, `required`, `urls`, `up_threshold`, `down_threshold`, `latency_ewma`) and the `on_switch` hook are swapped live; the listeners are not restarted and listen addresses are not changed. Because upstreams are rebuilt, all of them start as unhealthy and the active selection is dropped; the balancer re-probes on the next check cycle, so for up to one `interval` new connections may fail with `no healthy upstream available`. If the new config is invalid, the error is logged and the current configuration stays. |
 | `SIGINT`, `SIGTERM` | Graceful shutdown. |
 
 ```
@@ -375,7 +376,7 @@ Under systemd: `systemctl reload proxy-socks5-balancer`.
    ```
 
 3. Send `SIGHUP` to the balancer: `kill -HUP <pid>`.
-4. Check the status page: the new upstream appears in the table. It becomes healthy after its first successful check cycle.
+4. Check the status page: the new upstream appears in the table. On SIGHUP all upstreams are rebuilt as unhealthy, so for up to one `interval` new connections may fail with `no healthy upstream available` until the next check cycle; each upstream becomes healthy after its first successful check cycle.
 
 Names must be unique. Removing an upstream works the same way: edit the config and send `SIGHUP`.
 
@@ -383,7 +384,7 @@ Names must be unique. Removing an upstream works the same way: edit the config a
 
 A unit file is provided at `deploy/proxy-socks5-balancer.service`. It expects:
 
-- binary: `/usr/local/bin/proxy-socks5-balancer`;
+- binary: `/usr/bin/proxy-socks5-balancer`;
 - config: `/etc/proxy-socks5-balancer/config.yaml`;
 - a non-root user and group `proxy-balancer`.
 
@@ -391,7 +392,7 @@ Example setup:
 
 ```
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin proxy-balancer
-sudo install -m 0755 balancer /usr/local/bin/proxy-socks5-balancer
+sudo install -m 0755 balancer /usr/bin/proxy-socks5-balancer
 sudo install -d /etc/proxy-socks5-balancer
 sudo install -m 0644 config.yaml /etc/proxy-socks5-balancer/config.yaml
 sudo install -m 0644 deploy/proxy-socks5-balancer.service /etc/systemd/system/
