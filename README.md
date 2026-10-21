@@ -84,11 +84,15 @@ Packaging layout is defined in `nfpm.yaml`; maintainer scripts live in `deploy/s
 | `listen.socks5` | `127.0.0.1:10800` | Inbound SOCKS5 address |
 | `listen.http` | `127.0.0.1:10801` | Inbound HTTP proxy address |
 | `listen.status` | `127.0.0.1:10802` | Status page address |
+| `log.level` | `info` | Log verbosity: debug, info, warn, error |
+| `log.format` | `text` | Log format: text or json (stdout, journald-friendly) |
 | `check.interval` | `15s` | Time between check cycles |
 | `check.timeout` | `5s` | Timeout of each check request |
 | `check.required` | `1` | Minimum number of check URLs that must succeed (HTTP status < 400) |
 | `check.switch_margin` | `0.3` | Fraction by which another upstream must be faster to trigger a switch |
 | `check.urls` | none (required) | URLs fetched through each upstream |
+| `on_switch.command` | empty | Shell command run on each active-upstream change (disabled if empty) |
+| `on_switch.timeout` | `10s` | Max run time of the on_switch command |
 | `upstreams[].name` | none (required) | Unique upstream name |
 | `upstreams[].socks5` | none (required) | Upstream SOCKS5 address |
 
@@ -105,6 +109,20 @@ kill -HUP <pid>
 ```
 
 Reloads the config file and swaps upstreams, margin and check settings live. Listen addresses are not rebound. SIGINT/SIGTERM shut the service down gracefully.
+
+## On-switch hook
+
+Set `on_switch.command` to run a command whenever the active upstream changes. It runs via `sh -c` in the background, as the service user. The event is passed as environment variables: `BALANCER_OLD`, `BALANCER_OLD_ADDR`, `BALANCER_NEW`, `BALANCER_NEW_ADDR`, `BALANCER_NEW_LATENCY_MS`.
+
+```yaml
+on_switch:
+  command: 'notify-send "proxy -> $BALANCER_NEW ($BALANCER_NEW_LATENCY_MS ms)"'
+  timeout: 10s
+```
+
+## Logging
+
+Logs are structured (Go `slog`) and written to stdout, so journald captures them directly. `log.level` is `debug|info|warn|error`; `debug` adds a line per upstream per check cycle. `log.format` is `text` or `json`.
 
 ## Project layout
 

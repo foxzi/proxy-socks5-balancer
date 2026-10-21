@@ -69,6 +69,9 @@ listen:
   socks5: "127.0.0.1:10800"
   http:   "127.0.0.1:10801"
   status: "127.0.0.1:10802"
+log:
+  level: info
+  format: text
 check:
   interval: 15s
   timeout: 5s
@@ -78,6 +81,9 @@ check:
     - "https://www.google.com/generate_204"
     - "https://www.cloudflare.com/cdn-cgi/trace"
     - "https://api.github.com"
+on_switch:
+  command: ""
+  timeout: 10s
 upstreams:
   - name: xray-1
     socks5: "127.0.0.1:11080"
@@ -94,6 +100,15 @@ upstreams:
 | `listen.status` | `127.0.0.1:10802` | Address of the status web page and `/status.json`. |
 
 Listen addresses are read at startup. They are not changed by a config reload; to change them, restart the service.
+
+### log
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `log.level` | `info` | Verbosity: `debug`, `info`, `warn`, `error`. `debug` logs each upstream's result every check cycle. |
+| `log.format` | `text` | Output format: `text` or `json`. Logs go to stdout with no timestamp prefix, so journald adds its own. |
+
+Log level and format are applied at startup only; a reload does not change them.
 
 ### check
 
@@ -113,6 +128,35 @@ A list of local SOCKS5 proxies. At least one is required.
 |-------|---------|---------|
 | `upstreams[].name` | none | Unique name, shown on the status page. Must not be empty. |
 | `upstreams[].socks5` | none | Address of the upstream SOCKS5 proxy (`host:port`). Must not be empty. |
+
+### on_switch
+
+A command executed whenever the active upstream changes. Optional.
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `on_switch.command` | empty | Shell command run via `sh -c`. Empty disables the hook. Runs in the background as the (unprivileged) service user, so it must not require root. |
+| `on_switch.timeout` | `10s` | Maximum run time; the command is killed after it. |
+
+The event is passed as environment variables:
+
+| Variable | Meaning |
+|----------|---------|
+| `BALANCER_OLD` | Previous upstream name (`none` if there was none) |
+| `BALANCER_OLD_ADDR` | Previous upstream SOCKS5 address |
+| `BALANCER_NEW` | New upstream name (`none` if none) |
+| `BALANCER_NEW_ADDR` | New upstream SOCKS5 address |
+| `BALANCER_NEW_LATENCY_MS` | New upstream latency in milliseconds |
+
+Example:
+
+```yaml
+on_switch:
+  command: 'notify-send "proxy -> $BALANCER_NEW ($BALANCER_NEW_LATENCY_MS ms)"'
+  timeout: 10s
+```
+
+Note: `on_switch` is re-applied on SIGHUP reload.
 
 ### Validation
 
