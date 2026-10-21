@@ -15,8 +15,10 @@ const downThreshold = 2
 
 // Upstream is a single proxy endpoint and its live health state.
 type Upstream struct {
-	Name string
-	Addr string // SOCKS5 host:port
+	Name     string
+	Addr     string // SOCKS5 host:port
+	Priority int    // lower value is preferred; only the best healthy tier is used
+	Weight   int    // >1 makes the upstream look proportionally faster (min 1)
 
 	mu         sync.RWMutex
 	healthy    bool
@@ -30,8 +32,23 @@ type Upstream struct {
 }
 
 // New creates an upstream (initially unhealthy until first check).
-func New(name, addr string) *Upstream {
-	return &Upstream{Name: name, Addr: addr}
+func New(name, addr string, priority, weight int) *Upstream {
+	if weight < 1 {
+		weight = 1
+	}
+	return &Upstream{Name: name, Addr: addr, Priority: priority, Weight: weight}
+}
+
+// EffectiveLatency is the latency used for selection, scaled by weight so a
+// heavier upstream is preferred at equal raw latency.
+func (u *Upstream) EffectiveLatency() time.Duration {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	w := u.Weight
+	if w < 1 {
+		w = 1
+	}
+	return u.latency / time.Duration(w)
 }
 
 // DialContext dials target through this upstream's SOCKS5 proxy.
@@ -75,6 +92,8 @@ func (u *Upstream) Report(ok, total int, latency time.Duration, lastErr string) 
 type Snapshot struct {
 	Name      string
 	Addr      string
+	Priority  int
+	Weight    int
 	Healthy   bool
 	Latency   time.Duration
 	OK        int
@@ -89,6 +108,8 @@ func (u *Upstream) Snapshot() Snapshot {
 	return Snapshot{
 		Name:      u.Name,
 		Addr:      u.Addr,
+		Priority:  u.Priority,
+		Weight:    u.Weight,
 		Healthy:   u.healthy,
 		Latency:   u.latency,
 		OK:        u.okCount,

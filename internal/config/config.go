@@ -44,8 +44,10 @@ type Check struct {
 
 // Upstream is one proxy endpoint (v2ray/xray SOCKS5 inbound).
 type Upstream struct {
-	Name   string `yaml:"name"`
-	SOCKS5 string `yaml:"socks5"`
+	Name     string `yaml:"name"`
+	SOCKS5   string `yaml:"socks5"`
+	Priority int    `yaml:"priority"` // lower value wins; only the best tier is used
+	Weight   int    `yaml:"weight"`   // >1 makes an upstream look faster (default 1)
 }
 
 // Log holds logging options (output is stdout, suitable for journald).
@@ -130,7 +132,8 @@ func (c *Config) validate() error {
 		return fmt.Errorf("check.required (%d) > number of urls (%d)", c.Check.Required, len(c.Check.URLs))
 	}
 	names := map[string]bool{}
-	for i, u := range c.Upstreams {
+	for i := range c.Upstreams {
+		u := &c.Upstreams[i]
 		if u.Name == "" {
 			return fmt.Errorf("upstream #%d has empty name", i)
 		}
@@ -139,6 +142,12 @@ func (c *Config) validate() error {
 		}
 		if names[u.Name] {
 			return fmt.Errorf("duplicate upstream name %q", u.Name)
+		}
+		if u.Weight == 0 {
+			u.Weight = 1
+		}
+		if u.Weight < 0 {
+			return fmt.Errorf("upstream %q has negative weight", u.Name)
 		}
 		names[u.Name] = true
 	}

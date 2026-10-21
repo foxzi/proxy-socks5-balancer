@@ -57,18 +57,34 @@ func (s *Selector) Upstreams() []*upstream.Upstream {
 func (s *Selector) Current() *upstream.Upstream { return s.cur.Load() }
 
 // Reselect recomputes the active upstream after a check cycle.
-// Switches when the current is unhealthy, or another healthy upstream is
-// faster than the current by more than the margin.
+// Only the healthy upstreams in the best (lowest) priority tier are
+// considered. Within that tier it switches when the current is unhealthy or
+// in a worse tier, or another upstream is faster by more than the margin
+// (latency is weight-adjusted).
 func (s *Selector) Reselect() (changed bool, from, to *upstream.Upstream) {
 	ups := s.Upstreams()
 
-	var best *upstream.Upstream
+	// Best priority value present among healthy upstreams.
+	bestPrio := 0
+	havePrio := false
 	for _, u := range ups {
 		if !u.Healthy() {
 			continue
 		}
-		if best == nil || u.Latency() < best.Latency() {
-			best = u
+		if !havePrio || u.Priority < bestPrio {
+			bestPrio, havePrio = u.Priority, true
+		}
+	}
+
+	var best *upstream.Upstream
+	if havePrio {
+		for _, u := range ups {
+			if !u.Healthy() || u.Priority != bestPrio {
+				continue
+			}
+			if best == nil || u.EffectiveLatency() < best.EffectiveLatency() {
+				best = u
+			}
 		}
 	}
 
@@ -86,8 +102,13 @@ func (s *Selector) Reselect() (changed bool, from, to *upstream.Upstream) {
 		return cur != best, cur, best
 	}
 	if best != cur {
-		threshold := float64(cur.Latency()) * (1 - s.margin)
-		if float64(best.Latency()) < threshold {
+		// A better priority tier always wins over the margin rule.
+		if best.Priority < cur.Priority {
+			s.cur.Store(best)
+			return true, cur, best
+		}
+		threshold := float64(cur.EffectiveLatency()) * (1 - s.margin)
+		if float64(best.EffectiveLatency()) < threshold {
 			s.cur.Store(best)
 			return true, cur, best
 		}

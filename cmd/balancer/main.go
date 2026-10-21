@@ -120,7 +120,7 @@ func switchEvent(from, to *upstream.Upstream) hook.Event {
 func buildUpstreams(cfg *config.Config) []*upstream.Upstream {
 	ups := make([]*upstream.Upstream, 0, len(cfg.Upstreams))
 	for _, u := range cfg.Upstreams {
-		ups = append(ups, upstream.New(u.Name, u.SOCKS5))
+		ups = append(ups, upstream.New(u.Name, u.SOCKS5, u.Priority, u.Weight))
 	}
 	return ups
 }

@@ -141,7 +141,7 @@ const pageHTML = `<!DOCTYPE html>
 </div>
 <table>
   <tr>
-    <th>Active</th><th>Name</th><th>Address</th><th>Health</th>
+    <th>Active</th><th>Name</th><th>Address</th><th>Prio/Wt</th><th>Health</th>
     <th>Latency</th><th>OK/Total</th><th>Checked</th>
   </tr>
   {{range .Rows}}
@@ -149,6 +149,7 @@ const pageHTML = `<!DOCTYPE html>
     <td>{{if .Active}}<span class="badge">active</span>{{end}}</td>
     <td>{{.Name}}</td>
     <td>{{.Addr}}</td>
+    <td>{{.Priority}}/{{.Weight}}</td>
     <td>{{if .Healthy}}<span class="up">up</span>{{else}}<span class="down">down</span>{{end}}</td>
     <td>{{ms .Latency}}</td>
     <td>{{.OK}}/{{.Total}}</td>
