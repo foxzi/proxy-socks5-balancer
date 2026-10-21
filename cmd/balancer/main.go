@@ -14,6 +14,7 @@ import (
 	"proxy-socks5-balancer/internal/config"
 	"proxy-socks5-balancer/internal/frontend"
 	"proxy-socks5-balancer/internal/hook"
+	"proxy-socks5-balancer/internal/metrics"
 	"proxy-socks5-balancer/internal/selector"
 	"proxy-socks5-balancer/internal/status"
 	"proxy-socks5-balancer/internal/upstream"
@@ -34,9 +35,11 @@ func main() {
 	sel := selector.New(cfg.Check.SwitchMargin)
 	sel.SetUpstreams(buildUpstreams(cfg))
 
+	mx := metrics.New()
 	runner := hook.New(hookConfig(cfg))
 	chk := checker.New(sel, checkSettings(cfg))
 	chk.OnSwitch = func(from, to *upstream.Upstream) {
+		mx.Switch()
 		runner.Fire(switchEvent(from, to))
 	}
 
@@ -54,9 +57,9 @@ func main() {
 
 	go chk.Run(ctx)
 
-	socks := &frontend.SOCKS5{Addr: cfg.Listen.SOCKS5, Dial: dial}
-	httpProxy := &frontend.HTTPProxy{Addr: cfg.Listen.HTTP, Dial: dial}
-	statusSrv := &status.Server{Addr: cfg.Listen.Status, Sel: sel}
+	socks := &frontend.SOCKS5{Addr: cfg.Listen.SOCKS5, Dial: dial, Metrics: mx}
+	httpProxy := &frontend.HTTPProxy{Addr: cfg.Listen.HTTP, Dial: dial, Metrics: mx}
+	statusSrv := &status.Server{Addr: cfg.Listen.Status, Sel: sel, Metrics: mx}
 	statusSrv.Listen.SOCKS5 = cfg.Listen.SOCKS5
 	statusSrv.Listen.HTTP = cfg.Listen.HTTP
 

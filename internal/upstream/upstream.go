@@ -29,6 +29,10 @@ type Upstream struct {
 	checkedAt  time.Time
 	upStreak   int
 	downStreak int
+
+	// Cumulative counters since start (for Prometheus).
+	checkTotal    int64
+	checkFailures int64
 }
 
 // New creates an upstream (initially unhealthy until first check).
@@ -72,6 +76,7 @@ func (u *Upstream) Report(ok, total int, latency time.Duration, lastErr string) 
 	u.latency = latency
 	u.lastErr = lastErr
 	u.checkedAt = time.Now()
+	u.checkTotal++
 
 	pass := lastErr == "" // caller decides pass via empty error on success
 	if pass {
@@ -80,6 +85,7 @@ func (u *Upstream) Report(ok, total int, latency time.Duration, lastErr string) 
 		u.downStreak = 0
 		u.healthy = true
 	} else {
+		u.checkFailures++
 		u.downStreak++
 		u.upStreak = 0
 		if u.downStreak >= downThreshold {
@@ -90,32 +96,36 @@ func (u *Upstream) Report(ok, total int, latency time.Duration, lastErr string) 
 
 // Snapshot is an immutable view of the upstream state for status/selection.
 type Snapshot struct {
-	Name      string
-	Addr      string
-	Priority  int
-	Weight    int
-	Healthy   bool
-	Latency   time.Duration
-	OK        int
-	Total     int
-	LastErr   string
-	CheckedAt time.Time
+	Name          string
+	Addr          string
+	Priority      int
+	Weight        int
+	Healthy       bool
+	Latency       time.Duration
+	OK            int
+	Total         int
+	LastErr       string
+	CheckedAt     time.Time
+	CheckTotal    int64
+	CheckFailures int64
 }
 
 func (u *Upstream) Snapshot() Snapshot {
 	u.mu.RLock()
 	defer u.mu.RUnlock()
 	return Snapshot{
-		Name:      u.Name,
-		Addr:      u.Addr,
-		Priority:  u.Priority,
-		Weight:    u.Weight,
-		Healthy:   u.healthy,
-		Latency:   u.latency,
-		OK:        u.okCount,
-		Total:     u.total,
-		LastErr:   u.lastErr,
-		CheckedAt: u.checkedAt,
+		Name:          u.Name,
+		Addr:          u.Addr,
+		Priority:      u.Priority,
+		Weight:        u.Weight,
+		Healthy:       u.healthy,
+		Latency:       u.latency,
+		OK:            u.okCount,
+		Total:         u.total,
+		LastErr:       u.lastErr,
+		CheckedAt:     u.checkedAt,
+		CheckTotal:    u.checkTotal,
+		CheckFailures: u.checkFailures,
 	}
 }
 

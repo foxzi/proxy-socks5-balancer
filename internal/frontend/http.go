@@ -7,13 +7,16 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"proxy-socks5-balancer/internal/metrics"
 )
 
 // HTTPProxy is an inbound HTTP proxy supporting CONNECT (tunnel) and plain
 // HTTP forwarding. All traffic goes through the selected upstream.
 type HTTPProxy struct {
-	Addr string
-	Dial DialFunc
+	Addr    string
+	Dial    DialFunc
+	Metrics *metrics.Metrics
 }
 
 func (p *HTTPProxy) ListenAndServe(ctx context.Context) error {
@@ -41,6 +44,7 @@ func (p *HTTPProxy) ListenAndServe(ctx context.Context) error {
 }
 
 func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer p.Metrics.HTTPOpen()()
 	if r.Method == http.MethodConnect {
 		p.handleConnect(w, r)
 		return
@@ -52,6 +56,7 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	up, err := dialTimeout(p.Dial, "tcp", r.Host, 15*time.Second)
 	if err != nil {
+		p.Metrics.DialError()
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return
 	}
@@ -82,6 +87,7 @@ func (p *HTTPProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := transport.RoundTrip(outReq)
 	if err != nil {
+		p.Metrics.DialError()
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}

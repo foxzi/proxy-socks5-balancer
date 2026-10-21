@@ -9,13 +9,16 @@ import (
 	"net"
 	"strconv"
 	"time"
+
+	"proxy-socks5-balancer/internal/metrics"
 )
 
 // SOCKS5 is a minimal inbound SOCKS5 server (no auth, CONNECT only).
 // It forwards every accepted connection through the selected upstream.
 type SOCKS5 struct {
-	Addr string
-	Dial DialFunc
+	Addr    string
+	Dial    DialFunc
+	Metrics *metrics.Metrics
 }
 
 func (s *SOCKS5) ListenAndServe(ctx context.Context) error {
@@ -45,6 +48,7 @@ func (s *SOCKS5) ListenAndServe(ctx context.Context) error {
 
 func (s *SOCKS5) handle(conn net.Conn) {
 	defer conn.Close()
+	defer s.Metrics.SocksOpen()()
 	conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	if err := s.handshake(conn); err != nil {
@@ -57,6 +61,7 @@ func (s *SOCKS5) handle(conn net.Conn) {
 
 	up, err := dialTimeout(s.Dial, "tcp", target, 15*time.Second)
 	if err != nil {
+		s.Metrics.DialError()
 		// reply: general failure
 		conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		slog.Warn("socks5 dial failed", "target", target, "err", err)

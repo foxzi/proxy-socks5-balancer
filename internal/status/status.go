@@ -8,17 +8,20 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	"proxy-socks5-balancer/internal/metrics"
 	"proxy-socks5-balancer/internal/selector"
 	"proxy-socks5-balancer/internal/upstream"
 )
 
 // Server serves a simple status page and a JSON endpoint.
 type Server struct {
-	Addr   string
-	Sel    *selector.Selector
-	Listen struct {
+	Addr    string
+	Sel     *selector.Selector
+	Metrics *metrics.Metrics
+	Listen  struct {
 		SOCKS5 string
 		HTTP   string
 	}
@@ -28,6 +31,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handlePage)
 	mux.HandleFunc("/status.json", s.handleJSON)
+	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/healthz", s.handleHealthz)
 
 	srv := &http.Server{Addr: s.Addr, Handler: mux}
 	lc := net.ListenConfig{}
@@ -91,6 +96,89 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	if err := pageTmpl.Execute(w, data); err != nil {
 		slog.Error("status template error", "err", err)
 	}
+}
+
+// handleHealthz returns 200 when at least one upstream is healthy, else 503.
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	healthy := 0
+	for _, u := range s.Sel.Upstreams() {
+		if u.Healthy() {
+			healthy++
+		}
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if healthy == 0 {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprintln(w, "unhealthy: no upstream available")
+		return
+	}
+	fmt.Fprintf(w, "ok: %d healthy upstream(s)\n", healthy)
+}
+
+// handleMetrics exposes counters and per-upstream gauges in Prometheus text
+// format. Written by hand to avoid a client-library dependency.
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	var b strings.Builder
+
+	m := s.Metrics
+	writeCounter := func(name, help string, v int64) {
+		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, v)
+	}
+	if m != nil {
+		writeCounter("balancer_switches_total", "Active upstream changes.", m.Switches.Load())
+		writeCounter("balancer_frontend_dial_errors_total", "Failed dials to the active upstream.", m.DialErrors.Load())
+
+		fmt.Fprintf(&b, "# HELP balancer_frontend_connections_total Accepted frontend connections.\n# TYPE balancer_frontend_connections_total counter\n")
+		fmt.Fprintf(&b, "balancer_frontend_connections_total{frontend=\"socks5\"} %d\n", m.SocksConns.Load())
+		fmt.Fprintf(&b, "balancer_frontend_connections_total{frontend=\"http\"} %d\n", m.HTTPConns.Load())
+
+		fmt.Fprintf(&b, "# HELP balancer_frontend_active_connections Open frontend connections.\n# TYPE balancer_frontend_active_connections gauge\n")
+		fmt.Fprintf(&b, "balancer_frontend_active_connections{frontend=\"socks5\"} %d\n", m.SocksActive.Load())
+		fmt.Fprintf(&b, "balancer_frontend_active_connections{frontend=\"http\"} %d\n", m.HTTPActive.Load())
+	}
+
+	cur := s.Sel.Current()
+	curName := ""
+	if cur != nil {
+		curName = cur.Name
+	}
+	ups := s.Sel.Upstreams()
+
+	fmt.Fprintf(&b, "# HELP balancer_upstream_up Whether the upstream passed its last check (1) or not (0).\n# TYPE balancer_upstream_up gauge\n")
+	for _, u := range ups {
+		sn := u.Snapshot()
+		fmt.Fprintf(&b, "balancer_upstream_up{name=%q} %d\n", sn.Name, b2i(sn.Healthy))
+	}
+	fmt.Fprintf(&b, "# HELP balancer_upstream_latency_ms Last measured average latency in milliseconds.\n# TYPE balancer_upstream_latency_ms gauge\n")
+	for _, u := range ups {
+		sn := u.Snapshot()
+		fmt.Fprintf(&b, "balancer_upstream_latency_ms{name=%q} %d\n", sn.Name, sn.Latency.Milliseconds())
+	}
+	fmt.Fprintf(&b, "# HELP balancer_upstream_checks_total Total check cycles run for the upstream.\n# TYPE balancer_upstream_checks_total counter\n")
+	for _, u := range ups {
+		sn := u.Snapshot()
+		fmt.Fprintf(&b, "balancer_upstream_checks_total{name=%q} %d\n", sn.Name, sn.CheckTotal)
+	}
+	fmt.Fprintf(&b, "# HELP balancer_upstream_check_failures_total Total failed check cycles for the upstream.\n# TYPE balancer_upstream_check_failures_total counter\n")
+	for _, u := range ups {
+		sn := u.Snapshot()
+		fmt.Fprintf(&b, "balancer_upstream_check_failures_total{name=%q} %d\n", sn.Name, sn.CheckFailures)
+	}
+	fmt.Fprintf(&b, "# HELP balancer_active_upstream Whether the upstream is currently active (1) or not (0).\n# TYPE balancer_active_upstream gauge\n")
+	for _, u := range ups {
+		sn := u.Snapshot()
+		fmt.Fprintf(&b, "balancer_active_upstream{name=%q} %d\n", sn.Name, b2i(sn.Name == curName))
+	}
+
+	w.Write([]byte(b.String()))
+}
+
+func b2i(ok bool) int {
+	if ok {
+		return 1
+	}
+	return 0
 }
 
 func ms(d time.Duration) string {
