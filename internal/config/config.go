@@ -35,11 +35,14 @@ type Listen struct {
 
 // Check holds health-check parameters.
 type Check struct {
-	Interval     Duration `yaml:"interval"`
-	Timeout      Duration `yaml:"timeout"`
-	Required     int      `yaml:"required"`
-	SwitchMargin float64  `yaml:"switch_margin"`
-	URLs         []string `yaml:"urls"`
+	Interval      Duration `yaml:"interval"`
+	Timeout       Duration `yaml:"timeout"`
+	Required      int      `yaml:"required"`
+	SwitchMargin  float64  `yaml:"switch_margin"`
+	UpThreshold   int      `yaml:"up_threshold"`   // consecutive passes to mark healthy
+	DownThreshold int      `yaml:"down_threshold"` // consecutive failures to mark down
+	LatencyEWMA   float64  `yaml:"latency_ewma"`   // 0..1 smoothing; 0 uses the raw sample
+	URLs          []string `yaml:"urls"`
 }
 
 // Upstream is one proxy endpoint (v2ray/xray SOCKS5 inbound).
@@ -110,6 +113,12 @@ func (c *Config) applyDefaults() {
 	if c.Check.SwitchMargin == 0 {
 		c.Check.SwitchMargin = 0.3
 	}
+	if c.Check.UpThreshold == 0 {
+		c.Check.UpThreshold = 1
+	}
+	if c.Check.DownThreshold == 0 {
+		c.Check.DownThreshold = 2
+	}
 	if c.Log.Level == "" {
 		c.Log.Level = "info"
 	}
@@ -130,6 +139,9 @@ func (c *Config) validate() error {
 	}
 	if c.Check.Required > len(c.Check.URLs) {
 		return fmt.Errorf("check.required (%d) > number of urls (%d)", c.Check.Required, len(c.Check.URLs))
+	}
+	if c.Check.LatencyEWMA < 0 || c.Check.LatencyEWMA > 1 {
+		return fmt.Errorf("check.latency_ewma must be in [0,1], got %v", c.Check.LatencyEWMA)
 	}
 	names := map[string]bool{}
 	for i := range c.Upstreams {

@@ -9,16 +9,16 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-// hysteresis: how many consecutive failures mark a healthy upstream as down.
-// Recovery is immediate (one success) for a fast cold start.
-const downThreshold = 2
-
 // Upstream is a single proxy endpoint and its live health state.
 type Upstream struct {
 	Name     string
 	Addr     string // SOCKS5 host:port
 	Priority int    // lower value is preferred; only the best healthy tier is used
 	Weight   int    // >1 makes the upstream look proportionally faster (min 1)
+
+	upThreshold   int     // consecutive passes required to mark healthy
+	downThreshold int     // consecutive failures required to mark down
+	ewma          float64 // latency smoothing factor in [0,1]; 0 uses raw samples
 
 	mu         sync.RWMutex
 	healthy    bool
@@ -35,12 +35,35 @@ type Upstream struct {
 	checkFailures int64
 }
 
+// Params configures an upstream's selection weight and health hysteresis.
+type Params struct {
+	Priority      int
+	Weight        int
+	UpThreshold   int
+	DownThreshold int
+	LatencyEWMA   float64
+}
+
 // New creates an upstream (initially unhealthy until first check).
-func New(name, addr string, priority, weight int) *Upstream {
-	if weight < 1 {
-		weight = 1
+func New(name, addr string, p Params) *Upstream {
+	if p.Weight < 1 {
+		p.Weight = 1
 	}
-	return &Upstream{Name: name, Addr: addr, Priority: priority, Weight: weight}
+	if p.UpThreshold < 1 {
+		p.UpThreshold = 1
+	}
+	if p.DownThreshold < 1 {
+		p.DownThreshold = 1
+	}
+	return &Upstream{
+		Name:          name,
+		Addr:          addr,
+		Priority:      p.Priority,
+		Weight:        p.Weight,
+		upThreshold:   p.UpThreshold,
+		downThreshold: p.DownThreshold,
+		ewma:          p.LatencyEWMA,
+	}
 }
 
 // EffectiveLatency is the latency used for selection, scaled by weight so a
@@ -73,22 +96,31 @@ func (u *Upstream) Report(ok, total int, latency time.Duration, lastErr string) 
 	defer u.mu.Unlock()
 	u.okCount = ok
 	u.total = total
-	u.latency = latency
-	u.lastErr = lastErr
 	u.checkedAt = time.Now()
 	u.checkTotal++
 
 	pass := lastErr == "" // caller decides pass via empty error on success
 	if pass {
-		// Recover immediately on the first successful cycle.
+		// Smooth the latency sample when EWMA is enabled and a prior sample
+		// exists, otherwise take the raw value.
+		if u.ewma > 0 && u.latency > 0 {
+			u.latency = time.Duration(u.ewma*float64(latency) + (1-u.ewma)*float64(u.latency))
+		} else {
+			u.latency = latency
+		}
+		u.lastErr = ""
 		u.upStreak++
 		u.downStreak = 0
-		u.healthy = true
+		if u.upStreak >= u.upThreshold {
+			u.healthy = true
+		}
 	} else {
+		u.latency = latency
+		u.lastErr = lastErr
 		u.checkFailures++
 		u.downStreak++
 		u.upStreak = 0
-		if u.downStreak >= downThreshold {
+		if u.downStreak >= u.downThreshold {
 			u.healthy = false
 		}
 	}
