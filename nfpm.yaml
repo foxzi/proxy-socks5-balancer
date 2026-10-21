@@ -1,0 +1,36 @@
+name: proxy-socks5-balancer
+arch: amd64
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: Sergei Vorontsov <piligrim@rootnix.net>
+description: |
+  SOCKS5/HTTP balancer in front of local xray/v2ray upstreams.
+  Health-checks upstreams over several test sites and publishes stable
+  SOCKS5 and HTTP ports plus a web status page.
+homepage: https://github.com/piligrim/proxy-socks5-balancer
+license: MIT
+
+contents:
+  - src: ./dist/proxy-socks5-balancer
+    dst: /usr/bin/proxy-socks5-balancer
+
+  - src: ./config.yaml
+    dst: /etc/proxy-socks5-balancer/config.yaml
+    type: config|noreplace
+
+  - src: ./deploy/proxy-socks5-balancer.service
+    dst: /usr/lib/systemd/system/proxy-socks5-balancer.service
+
+  - src: ./README.md
+    dst: /usr/share/doc/proxy-socks5-balancer/README.md
+  - src: ./docs/ru.md
+    dst: /usr/share/doc/proxy-socks5-balancer/ru.md
+  - src: ./docs/en.md
+    dst: /usr/share/doc/proxy-socks5-balancer/en.md
+
+scripts:
+  postinstall: ./deploy/scripts/postinstall.sh
+  preremove: ./deploy/scripts/preremove.sh
+  postremove: ./deploy/scripts/postremove.sh
