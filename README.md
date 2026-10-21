@@ -47,7 +47,35 @@ Browser setup:
 
 Status page: http://127.0.0.1:10802
 
-A systemd unit is provided in `deploy/proxy-socks5-balancer.service` (binary at `/usr/local/bin/proxy-socks5-balancer`, config at `/etc/proxy-socks5-balancer/config.yaml`, user `proxy-balancer`).
+A systemd unit is provided in `deploy/proxy-socks5-balancer.service` (binary at `/usr/bin/proxy-socks5-balancer`, config at `/etc/proxy-socks5-balancer/config.yaml`, user `proxy-balancer`).
+
+## Packages (deb / rpm)
+
+Build `.deb` and `.rpm` packages with [nfpm](https://nfpm.goreleaser.com/) running in Docker (nothing to install on the host):
+
+```sh
+VERSION=0.1.0 deploy/build-packages.sh
+# -> dist/proxy-socks5-balancer_0.1.0_amd64.deb
+# -> dist/proxy-socks5-balancer-0.1.0-1.x86_64.rpm
+```
+
+Install:
+
+```sh
+sudo apt install ./dist/proxy-socks5-balancer_0.1.0_amd64.deb   # Debian/Ubuntu
+sudo dnf install ./dist/proxy-socks5-balancer-0.1.0-1.x86_64.rpm # RHEL/Fedora
+```
+
+The package creates the `proxy-balancer` system user, installs the systemd unit
+and ships `config.yaml` as a protected config file (not overwritten on upgrade).
+After install:
+
+```sh
+sudoedit /etc/proxy-socks5-balancer/config.yaml
+sudo systemctl enable --now proxy-socks5-balancer
+```
+
+Packaging layout is defined in `nfpm.yaml`; maintainer scripts live in `deploy/scripts/`.
 
 ## Configuration reference
 
