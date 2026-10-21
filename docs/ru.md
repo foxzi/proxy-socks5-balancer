@@ -15,6 +15,7 @@
 9. Добавление апстрима
 10. Запуск под systemd
 11. Диагностика проблем
+12. Пакеты deb/rpm
 
 ## 1. Обзор
 
@@ -324,3 +325,43 @@ sudo systemctl enable --now proxy-socks5-balancer
 - `OK/Total` равное `1/3` при `required: 2` означает, что апстрим не прошёл цикл.
 - Latency `-` означает, что успешных измерений ещё не было.
 - Checked показывает, как давно завершился последний цикл для этого апстрима; значение должно оставаться в пределах примерно одного `interval`.
+
+## 12. Пакеты deb/rpm
+
+Оба пакета собираются из одного описания `nfpm.yaml` с помощью [nfpm](https://nfpm.goreleaser.com/), который запускается в Docker, поэтому на хост-машину ничего ставить не нужно.
+
+Сборка:
+
+```sh
+VERSION=0.1.0 deploy/build-packages.sh
+```
+
+Скрипт собирает бинарь (`CGO_ENABLED=0`, из локального кэша модулей) в `dist/`, затем прогоняет nfpm дважды и кладёт туда:
+
+- `dist/proxy-socks5-balancer_0.1.0_amd64.deb`
+- `dist/proxy-socks5-balancer-0.1.0-1.x86_64.rpm`
+
+Что внутри пакета:
+
+| Путь | Назначение |
+|------|------------|
+| `/usr/bin/proxy-socks5-balancer` | бинарь |
+| `/etc/proxy-socks5-balancer/config.yaml` | конфиг (помечен как `config|noreplace`, не затирается при обновлении) |
+| `/usr/lib/systemd/system/proxy-socks5-balancer.service` | systemd-юнит |
+| `/usr/share/doc/proxy-socks5-balancer/` | README и документация |
+
+Maintainer-скрипты (`deploy/scripts/`):
+
+- `postinstall` - создаёт системного пользователя `proxy-balancer` и делает `systemctl daemon-reload`;
+- `preremove` - останавливает сервис перед удалением;
+- `postremove` - делает `systemctl daemon-reload` после удаления.
+
+Установка:
+
+```sh
+sudo apt install ./dist/proxy-socks5-balancer_0.1.0_amd64.deb     # Debian/Ubuntu
+sudo dnf install ./dist/proxy-socks5-balancer-0.1.0-1.x86_64.rpm   # RHEL/Fedora
+
+sudoedit /etc/proxy-socks5-balancer/config.yaml
+sudo systemctl enable --now proxy-socks5-balancer
+```

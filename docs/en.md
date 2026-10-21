@@ -15,6 +15,7 @@
 9. Adding an upstream
 10. Running under systemd
 11. Troubleshooting
+12. deb/rpm packages
 
 ## 1. Overview
 
@@ -324,3 +325,43 @@ The process exits on config errors and when a listener cannot start (for example
 - `OK/Total` of `1/3` with `required: 2` means the upstream failed the cycle.
 - Latency of `-` means no successful measurement yet.
 - Checked shows how long ago the last cycle for that upstream completed; it should stay within about one `interval`.
+
+## 12. deb/rpm packages
+
+Both packages are built from a single `nfpm.yaml` description with [nfpm](https://nfpm.goreleaser.com/) running in Docker, so nothing needs to be installed on the host.
+
+Build:
+
+```sh
+VERSION=0.1.0 deploy/build-packages.sh
+```
+
+The script builds the binary (`CGO_ENABLED=0`, from the local module cache) into `dist/`, then runs nfpm twice and produces:
+
+- `dist/proxy-socks5-balancer_0.1.0_amd64.deb`
+- `dist/proxy-socks5-balancer-0.1.0-1.x86_64.rpm`
+
+Package layout:
+
+| Path | Purpose |
+|------|---------|
+| `/usr/bin/proxy-socks5-balancer` | binary |
+| `/etc/proxy-socks5-balancer/config.yaml` | config (marked `config|noreplace`, kept on upgrade) |
+| `/usr/lib/systemd/system/proxy-socks5-balancer.service` | systemd unit |
+| `/usr/share/doc/proxy-socks5-balancer/` | README and documentation |
+
+Maintainer scripts (`deploy/scripts/`):
+
+- `postinstall` - creates the `proxy-balancer` system user and runs `systemctl daemon-reload`;
+- `preremove` - stops the service before removal;
+- `postremove` - runs `systemctl daemon-reload` after removal.
+
+Install:
+
+```sh
+sudo apt install ./dist/proxy-socks5-balancer_0.1.0_amd64.deb     # Debian/Ubuntu
+sudo dnf install ./dist/proxy-socks5-balancer-0.1.0-1.x86_64.rpm   # RHEL/Fedora
+
+sudoedit /etc/proxy-socks5-balancer/config.yaml
+sudo systemctl enable --now proxy-socks5-balancer
+```
