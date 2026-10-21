@@ -1,0 +1,22 @@
+# proxy-socks5-balancer configuration
+
+listen:
+  socks5: "127.0.0.1:10800"   # point your browser/programs here (SOCKS5)
+  http:   "127.0.0.1:10801"   # or here (HTTP proxy)
+  status: "127.0.0.1:10802"   # web status page
+
+check:
+  interval: 15s          # how often to probe every upstream
+  timeout: 5s            # per-request timeout
+  required: 2            # proxy is healthy if at least N of the urls below respond
+  switch_margin: 0.3     # switch only if another proxy is >30% faster (anti-flapping)
+  urls:
+    - "https://www.google.com/generate_204"
+    - "https://www.cloudflare.com/cdn-cgi/trace"
+    - "https://api.github.com"
+
+upstreams:
+  - name: xray-1
+    socks5: "127.0.0.1:11080"
+  - name: xray-2
+    socks5: "127.0.0.1:11081"
