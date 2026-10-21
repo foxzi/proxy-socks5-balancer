@@ -19,6 +19,14 @@ check:
     - "https://www.cloudflare.com/cdn-cgi/trace"
     - "https://api.github.com"
 
+# Optional command executed when the active upstream changes. Runs as the
+# service user (unprivileged) via "sh -c". The event is passed as env vars:
+#   BALANCER_OLD, BALANCER_OLD_ADDR, BALANCER_NEW, BALANCER_NEW_ADDR,
+#   BALANCER_NEW_LATENCY_MS
+# Leave command empty to disable.
+on_switch:
+  command: ""            # e.g. notify-send "proxy -> $BALANCER_NEW ($BALANCER_NEW_LATENCY_MS ms)"
+  timeout: 10s
 
 upstreams:
   - name: xray-1

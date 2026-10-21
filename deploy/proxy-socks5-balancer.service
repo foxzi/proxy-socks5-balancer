@@ -23,6 +23,9 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
+# Note: an on_switch hook inherits these restrictions. ProtectSystem=strict
+# makes the filesystem read-only, so if the hook must write somewhere add e.g.
+# ReadWritePaths=/var/lib/proxy-socks5-balancer here.
 
 [Install]
 WantedBy=multi-user.target

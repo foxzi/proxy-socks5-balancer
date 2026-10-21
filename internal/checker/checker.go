@@ -24,6 +24,9 @@ type Settings struct {
 type Checker struct {
 	sel      *selector.Selector
 	settings atomic.Pointer[Settings]
+
+	// OnSwitch, if set, is called when the active upstream changes.
+	OnSwitch func(from, to *upstream.Upstream)
 }
 
 func New(sel *selector.Selector, s Settings) *Checker {
@@ -67,6 +70,9 @@ func (c *Checker) cycle(ctx context.Context) {
 		slog.Info("active upstream changed",
 			"from", name(from), "to", name(to),
 			"latency_ms", latencyMS(to))
+		if c.OnSwitch != nil {
+			c.OnSwitch(from, to)
+		}
 	}
 }
 

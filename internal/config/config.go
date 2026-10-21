@@ -54,11 +54,18 @@ type Log struct {
 	Format string `yaml:"format"` // text|json
 }
 
+// Hook is a command executed when the active upstream changes.
+type Hook struct {
+	Command string   `yaml:"command"` // empty disables the hook
+	Timeout Duration `yaml:"timeout"`
+}
+
 // Config is the full service configuration.
 type Config struct {
 	Listen    Listen     `yaml:"listen"`
 	Log       Log        `yaml:"log"`
 	Check     Check      `yaml:"check"`
+	OnSwitch  Hook       `yaml:"on_switch"`
 	Upstreams []Upstream `yaml:"upstreams"`
 }
 
@@ -106,6 +113,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Log.Format == "" {
 		c.Log.Format = "text"
+	}
+	if c.OnSwitch.Timeout == 0 {
+		c.OnSwitch.Timeout = Duration(10 * time.Second)
 	}
 }
 

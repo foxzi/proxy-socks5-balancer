@@ -13,6 +13,7 @@ import (
 	"proxy-socks5-balancer/internal/checker"
 	"proxy-socks5-balancer/internal/config"
 	"proxy-socks5-balancer/internal/frontend"
+	"proxy-socks5-balancer/internal/hook"
 	"proxy-socks5-balancer/internal/selector"
 	"proxy-socks5-balancer/internal/status"
 	"proxy-socks5-balancer/internal/upstream"
@@ -33,7 +34,11 @@ func main() {
 	sel := selector.New(cfg.Check.SwitchMargin)
 	sel.SetUpstreams(buildUpstreams(cfg))
 
+	runner := hook.New(hookConfig(cfg))
 	chk := checker.New(sel, checkSettings(cfg))
+	chk.OnSwitch = func(from, to *upstream.Upstream) {
+		runner.Fire(switchEvent(from, to))
+	}
 
 	// Dial function used by both frontends: route through the active upstream.
 	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -59,7 +64,7 @@ func main() {
 	go serve("http", func() error { return httpProxy.ListenAndServe(ctx) }, stop)
 	go serve("status", func() error { return statusSrv.ListenAndServe(ctx) }, stop)
 
-	go handleReload(ctx, *cfgPath, sel, chk)
+	go handleReload(ctx, *cfgPath, sel, chk, runner)
 
 	slog.Info("balancer started", "upstreams", len(cfg.Upstreams),
 		"socks5", cfg.Listen.SOCKS5, "http", cfg.Listen.HTTP, "status", cfg.Listen.Status)
@@ -93,6 +98,25 @@ func parseLevel(s string) slog.Level {
 	}
 }
 
+func hookConfig(cfg *config.Config) hook.Config {
+	return hook.Config{
+		Command: cfg.OnSwitch.Command,
+		Timeout: cfg.OnSwitch.Timeout.Std(),
+	}
+}
+
+func switchEvent(from, to *upstream.Upstream) hook.Event {
+	ev := hook.Event{}
+	if from != nil {
+		ev.OldName, ev.OldAddr = from.Name, from.Addr
+	}
+	if to != nil {
+		ev.NewName, ev.NewAddr = to.Name, to.Addr
+		ev.NewLatencyMS = to.Latency().Milliseconds()
+	}
+	return ev
+}
+
 func buildUpstreams(cfg *config.Config) []*upstream.Upstream {
 	ups := make([]*upstream.Upstream, 0, len(cfg.Upstreams))
 	for _, u := range cfg.Upstreams {
@@ -119,7 +143,7 @@ func serve(name string, run func() error, stop context.CancelFunc) {
 }
 
 // handleReload reloads the config on SIGHUP and swaps upstreams/settings live.
-func handleReload(ctx context.Context, path string, sel *selector.Selector, chk *checker.Checker) {
+func handleReload(ctx context.Context, path string, sel *selector.Selector, chk *checker.Checker, runner *hook.Runner) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGHUP)
 	for {
@@ -135,6 +159,7 @@ func handleReload(ctx context.Context, path string, sel *selector.Selector, chk 
 			sel.SetMargin(cfg.Check.SwitchMargin)
 			sel.SetUpstreams(buildUpstreams(cfg))
 			chk.SetSettings(checkSettings(cfg))
+			runner.Set(hookConfig(cfg))
 			slog.Info("config reloaded", "upstreams", len(cfg.Upstreams))
 		}
 	}
