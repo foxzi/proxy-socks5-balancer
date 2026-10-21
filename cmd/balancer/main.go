@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -24,8 +24,11 @@ func main() {
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		// Logging is not configured yet; use the default logger.
+		slog.Error("config load failed", "err", err)
+		os.Exit(1)
 	}
+	setupLogging(cfg.Log)
 
 	sel := selector.New(cfg.Check.SwitchMargin)
 	sel.SetUpstreams(buildUpstreams(cfg))
@@ -58,9 +61,36 @@ func main() {
 
 	go handleReload(ctx, *cfgPath, sel, chk)
 
-	log.Printf("balancer started with %d upstreams", len(cfg.Upstreams))
+	slog.Info("balancer started", "upstreams", len(cfg.Upstreams),
+		"socks5", cfg.Listen.SOCKS5, "http", cfg.Listen.HTTP, "status", cfg.Listen.Status)
 	<-ctx.Done()
-	log.Printf("shutting down")
+	slog.Info("shutting down")
+}
+
+// setupLogging installs the global slog logger based on config. Output goes to
+// stdout without timestamps (journald adds its own) in text or JSON format.
+func setupLogging(c config.Log) {
+	opts := &slog.HandlerOptions{Level: parseLevel(c.Level)}
+	var h slog.Handler
+	if c.Format == "json" {
+		h = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		h = slog.NewTextHandler(os.Stdout, opts)
+	}
+	slog.SetDefault(slog.New(h))
+}
+
+func parseLevel(s string) slog.Level {
+	switch s {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func buildUpstreams(cfg *config.Config) []*upstream.Upstream {
@@ -83,7 +113,7 @@ func checkSettings(cfg *config.Config) checker.Settings {
 // serve runs a listener and aborts the whole process on fatal startup errors.
 func serve(name string, run func() error, stop context.CancelFunc) {
 	if err := run(); err != nil {
-		log.Printf("%s frontend error: %v", name, err)
+		slog.Error("frontend error", "frontend", name, "err", err)
 		stop()
 	}
 }
@@ -99,13 +129,13 @@ func handleReload(ctx context.Context, path string, sel *selector.Selector, chk 
 		case <-ch:
 			cfg, err := config.Load(path)
 			if err != nil {
-				log.Printf("reload failed: %v", err)
+				slog.Error("reload failed", "err", err)
 				continue
 			}
 			sel.SetMargin(cfg.Check.SwitchMargin)
 			sel.SetUpstreams(buildUpstreams(cfg))
 			chk.SetSettings(checkSettings(cfg))
-			log.Printf("reloaded config: %d upstreams", len(cfg.Upstreams))
+			slog.Info("config reloaded", "upstreams", len(cfg.Upstreams))
 		}
 	}
 }

@@ -5,6 +5,10 @@ listen:
   http:   "127.0.0.1:10801"   # or here (HTTP proxy)
   status: "127.0.0.1:10802"   # web status page
 
+log:
+  level: info            # debug | info | warn | error
+  format: text           # text | json (json is handy for log collectors)
+
 check:
   interval: 15s          # how often to probe every upstream
   timeout: 5s            # per-request timeout
@@ -14,6 +18,7 @@ check:
     - "https://www.google.com/generate_204"
     - "https://www.cloudflare.com/cdn-cgi/trace"
     - "https://api.github.com"
+
 
 upstreams:
   - name: xray-1

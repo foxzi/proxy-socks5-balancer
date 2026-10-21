@@ -2,7 +2,7 @@ package checker
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -64,7 +64,9 @@ func (c *Checker) cycle(ctx context.Context) {
 	wg.Wait()
 
 	if changed, from, to := c.sel.Reselect(); changed {
-		log.Printf("active upstream: %s -> %s", name(from), name(to))
+		slog.Info("active upstream changed",
+			"from", name(from), "to", name(to),
+			"latency_ms", latencyMS(to))
 	}
 }
 
@@ -111,6 +113,12 @@ func (c *Checker) probe(ctx context.Context, u *upstream.Upstream, s *Settings) 
 		lastErr = "" // empty error signals a passing cycle to Report
 	}
 	u.Report(ok, len(s.URLs), latency, lastErr)
+
+	slog.Debug("checked upstream",
+		"upstream", u.Name, "addr", u.Addr,
+		"ok", ok, "total", len(s.URLs),
+		"latency_ms", latency.Milliseconds(),
+		"healthy", u.Healthy(), "passed", passed)
 }
 
 func name(u *upstream.Upstream) string {
@@ -118,4 +126,11 @@ func name(u *upstream.Upstream) string {
 		return "none"
 	}
 	return u.Name
+}
+
+func latencyMS(u *upstream.Upstream) int64 {
+	if u == nil {
+		return 0
+	}
+	return u.Latency().Milliseconds()
 }

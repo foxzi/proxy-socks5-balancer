@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -35,7 +35,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("status page on http://%s", s.Addr)
+	slog.Info("status page listening", "addr", s.Addr)
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -89,7 +89,7 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := pageTmpl.Execute(w, data); err != nil {
-		log.Printf("status: template error: %v", err)
+		slog.Error("status template error", "err", err)
 	}
 }
 

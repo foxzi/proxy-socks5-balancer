@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"strconv"
 	"time"
@@ -24,7 +24,7 @@ func (s *SOCKS5) ListenAndServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("socks5 frontend listening on %s", s.Addr)
+	slog.Info("socks5 frontend listening", "addr", s.Addr)
 	go func() {
 		<-ctx.Done()
 		ln.Close()
@@ -59,7 +59,7 @@ func (s *SOCKS5) handle(conn net.Conn) {
 	if err != nil {
 		// reply: general failure
 		conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-		log.Printf("socks5: dial %s failed: %v", target, err)
+		slog.Warn("socks5 dial failed", "target", target, "err", err)
 		return
 	}
 	defer up.Close()

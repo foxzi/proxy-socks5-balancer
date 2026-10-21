@@ -3,7 +3,7 @@ package frontend
 import (
 	"context"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -26,7 +26,7 @@ func (p *HTTPProxy) ListenAndServe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("http frontend listening on %s", p.Addr)
+	slog.Info("http frontend listening", "addr", p.Addr)
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

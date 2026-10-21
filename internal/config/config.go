@@ -48,9 +48,16 @@ type Upstream struct {
 	SOCKS5 string `yaml:"socks5"`
 }
 
+// Log holds logging options (output is stdout, suitable for journald).
+type Log struct {
+	Level  string `yaml:"level"`  // debug|info|warn|error
+	Format string `yaml:"format"` // text|json
+}
+
 // Config is the full service configuration.
 type Config struct {
 	Listen    Listen     `yaml:"listen"`
+	Log       Log        `yaml:"log"`
 	Check     Check      `yaml:"check"`
 	Upstreams []Upstream `yaml:"upstreams"`
 }
@@ -93,6 +100,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Check.SwitchMargin == 0 {
 		c.Check.SwitchMargin = 0.3
+	}
+	if c.Log.Level == "" {
+		c.Log.Level = "info"
+	}
+	if c.Log.Format == "" {
+		c.Log.Format = "text"
 	}
 }
 
