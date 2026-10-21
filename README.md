@@ -9,8 +9,10 @@ Documentation: [English](docs/en.md) | [Russian](docs/ru.md)
 - One stable SOCKS5 port and one stable HTTP-proxy port (CONNECT tunneling and plain HTTP forwarding).
 - Periodic health checks of every upstream through its own SOCKS5 using several URLs; an upstream is healthy if at least `required` of them respond.
 - Selection of the healthy upstream with the lowest latency, with a switch margin to avoid flapping.
-- Hysteresis: fast cold start, marked down only after 2 consecutive failed cycles.
-- Status web page (auto-refresh every 5 s) and `/status.json`.
+- Upstream `priority` tiers (lower wins, higher tiers are standby) and `weight` to prefer faster-looking upstreams within a tier.
+- Hysteresis: configurable `up_threshold` / `down_threshold` (defaults: fast cold start, marked down after 2 consecutive failed cycles) and optional latency smoothing (`latency_ewma`).
+- Passive health: a failed dial through the active upstream triggers an immediate re-check.
+- Status web page (auto-refresh every 5 s), `/status.json`, Prometheus `/metrics` and `/healthz`.
 - Live config reload on SIGHUP without restarting the listeners; graceful shutdown on SIGINT/SIGTERM.
 
 ## How it works
@@ -24,7 +26,9 @@ browser / program     |
   status :10802
 ```
 
-The checker probes all upstreams every `interval`. The selector keeps a single active upstream: the healthy one with the lowest latency. It switches only when the current one becomes unhealthy or another healthy one is faster by more than `switch_margin`. Every inbound connection is forwarded through the active upstream. If no upstream is healthy, new connections fail with `no healthy upstream available`.
+The checker probes all upstreams every `interval`. The selector keeps a single active upstream: among the healthy upstreams in the best (lowest) `priority` tier, the one with the lowest latency (divided by `weight`). It switches only when the current one becomes unhealthy or another healthy one is faster by more than `switch_margin`. Every inbound connection is forwarded through the active upstream. If no upstream is healthy, new connections fail with `no healthy upstream available`.
+
+Passive health: when a frontend fails to dial through the active upstream, the balancer triggers an out-of-band health re-check instead of waiting for the next `interval`. The re-check is rate-limited by `check.timeout` and coalesced. A dial failure does not mark the upstream down by itself, so a single bad target host cannot eject a healthy upstream.
 
 ## Quick start
 
@@ -90,17 +94,29 @@ Packaging layout is defined in `nfpm.yaml`; maintainer scripts live in `deploy/s
 | `check.timeout` | `5s` | Timeout of each check request |
 | `check.required` | `1` | Minimum number of check URLs that must succeed (HTTP status < 400) |
 | `check.switch_margin` | `0.3` | Fraction by which another upstream must be faster to trigger a switch |
+| `check.up_threshold` | `1` | Consecutive successful check cycles before an upstream is marked healthy |
+| `check.down_threshold` | `2` | Consecutive failed check cycles before a healthy upstream is marked down |
+| `check.latency_ewma` | `0` | Latency smoothing factor, 0..1; `0` uses the raw latest sample |
 | `check.urls` | none (required) | URLs fetched through each upstream |
 | `on_switch.command` | empty | Shell command run on each active-upstream change (disabled if empty) |
 | `on_switch.timeout` | `10s` | Max run time of the on_switch command |
 | `upstreams[].name` | none (required) | Unique upstream name |
 | `upstreams[].socks5` | none (required) | Upstream SOCKS5 address |
+| `upstreams[].priority` | `0` | Lower value wins; only healthy upstreams in the best (lowest) tier are used, higher-number tiers are standby/failover |
+| `upstreams[].weight` | `1` | Must be >= 1; a higher weight divides the measured latency for selection, so the upstream is preferred within its tier |
 
-Validation fails on: no upstreams, no check URLs, `required` greater than the number of URLs, empty upstream name, empty SOCKS5 address, duplicate upstream name.
+`latency_ewma` smooths the measured latency over time to reduce selection flapping: `smoothed = ewma*new + (1-ewma)*old`. A value like `0.3` is a reasonable start.
+
+Validation fails on: no upstreams, no check URLs, `required` greater than the number of URLs, empty upstream name, empty SOCKS5 address, duplicate upstream name, `latency_ewma` outside 0..1, negative `weight`.
 
 ## Status page
 
-`http://<listen.status>/` shows, for each upstream: name, address, health (up/down), latency, ok/total, last check time and last error, and marks the active upstream. `http://<listen.status>/status.json` returns the same data as JSON.
+`http://<listen.status>/` shows, for each upstream: name, address, priority/weight, health (up/down), latency, ok/total, last check time and last error, and marks the active upstream. `http://<listen.status>/status.json` returns the same data as JSON.
+
+The status server also exposes:
+
+- `GET /metrics`: Prometheus text-format metrics, e.g. `balancer_upstream_up{name="xray-1"}` (1 healthy / 0 down), `balancer_upstream_latency_ms{name="xray-1"}`, `balancer_frontend_connections_total{frontend="socks5"}`, `balancer_frontend_dial_errors_total`.
+- `GET /healthz`: 200 (body starts with `ok`) when at least one upstream is healthy, otherwise 503. Useful for load balancers, systemd and monitoring.
 
 ## Config reload
 
@@ -133,7 +149,8 @@ internal/upstream       upstream model, health state, SOCKS5 dialing
 internal/checker        periodic probing
 internal/selector       min-latency selection with switch margin
 internal/frontend       inbound SOCKS5 and HTTP proxy servers
-internal/status         status web page and JSON endpoint
+internal/status         status web page, JSON, /metrics and /healthz
+internal/metrics        runtime counters for /metrics
 deploy/                 systemd unit
 docs/                   full documentation (en, ru)
 ```

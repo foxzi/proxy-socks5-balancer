@@ -36,7 +36,7 @@ browser / program        |
            |
         checker  (probes every upstream each `interval`)
 
-  status :10802  -> web page and /status.json
+  status :10802  -> web page, /status.json, /metrics, /healthz
 ```
 
 Components:
@@ -45,11 +45,12 @@ Components:
 - `internal/config`: config loading, defaults and validation.
 - `internal/upstream`: upstream model, health state, SOCKS5 dialing.
 - `internal/checker`: periodic probing of upstreams.
-- `internal/selector`: min-latency selection with switch margin.
+- `internal/selector`: selection by priority tier, then min weighted latency with switch margin.
 - `internal/frontend`: inbound SOCKS5 and HTTP proxy servers.
-- `internal/status`: status web page and JSON endpoint.
+- `internal/status`: status web page, JSON endpoint, Prometheus `/metrics` and `/healthz`.
+- `internal/metrics`: runtime counters exposed by `/metrics`.
 
-Both frontends use the same dial function: it asks the selector for the current upstream and dials the target through that upstream's SOCKS5. If there is no active upstream, the dial fails with `no healthy upstream available`.
+Both frontends use the same dial function: it asks the selector for the current upstream and dials the target through that upstream's SOCKS5. If there is no active upstream, the dial fails with `no healthy upstream available`. If dialing through the active upstream fails, the checker is asked to re-check out of band (see "Passive health" in section 4).
 
 Build and run:
 
@@ -77,6 +78,9 @@ check:
   timeout: 5s
   required: 2
   switch_margin: 0.3
+  up_threshold: 1
+  down_threshold: 2
+  latency_ewma: 0
   urls:
     - "https://www.google.com/generate_204"
     - "https://www.cloudflare.com/cdn-cgi/trace"
@@ -87,8 +91,12 @@ on_switch:
 upstreams:
   - name: xray-1
     socks5: "127.0.0.1:11080"
+    priority: 0
+    weight: 1
   - name: xray-2
     socks5: "127.0.0.1:11081"
+    priority: 0
+    weight: 1
 ```
 
 ### listen
@@ -97,7 +105,7 @@ upstreams:
 |-------|---------|---------|
 | `listen.socks5` | `127.0.0.1:10800` | Address of the inbound SOCKS5 server. Point browsers and programs here. |
 | `listen.http` | `127.0.0.1:10801` | Address of the inbound HTTP proxy. |
-| `listen.status` | `127.0.0.1:10802` | Address of the status web page and `/status.json`. |
+| `listen.status` | `127.0.0.1:10802` | Address of the status web page, `/status.json`, `/metrics` and `/healthz`. |
 
 Listen addresses are read at startup. They are not changed by a config reload; to change them, restart the service.
 
@@ -118,6 +126,9 @@ Log level and format are applied at startup only; a reload does not change them.
 | `check.timeout` | `5s` | Timeout of each individual check request. |
 | `check.required` | `1` | Minimum number of check URLs (N of M) that must respond with HTTP status < 400 for an upstream to be healthy. |
 | `check.switch_margin` | `0.3` | Fraction by which another healthy upstream must be faster than the current one to trigger a switch (0.3 = 30% faster). |
+| `check.up_threshold` | `1` | Number of consecutive successful check cycles before an upstream is marked healthy. |
+| `check.down_threshold` | `2` | Number of consecutive failed check cycles before a healthy upstream is marked down. This is hysteresis to avoid flapping. |
+| `check.latency_ewma` | `0` | Exponential smoothing factor for the measured latency, from 0 to 1. `0` uses the raw latest sample. A value like `0.3` smooths latency over time to reduce selection flapping. Formula: `smoothed = ewma*new + (1-ewma)*old`. |
 | `check.urls` | none | List of URLs fetched through each upstream. At least one is required. |
 
 ### upstreams
@@ -128,6 +139,8 @@ A list of local SOCKS5 proxies. At least one is required.
 |-------|---------|---------|
 | `upstreams[].name` | none | Unique name, shown on the status page. Must not be empty. |
 | `upstreams[].socks5` | none | Address of the upstream SOCKS5 proxy (`host:port`). Must not be empty. |
+| `upstreams[].priority` | `0` | Integer; lower value wins. Only healthy upstreams in the best (lowest) available priority tier are used for selection; higher-number tiers act as standby/failover. |
+| `upstreams[].weight` | `1` | Integer, must be >= 1. A higher weight divides the measured latency for selection purposes, making the upstream look faster, so it is preferred within its tier. |
 
 ### on_switch
 
@@ -167,7 +180,9 @@ Loading fails (at startup the process exits; on reload the error is logged and t
 - `required` is greater than the number of URLs;
 - an upstream name is empty;
 - an upstream `socks5` address is empty;
-- two upstreams have the same name.
+- two upstreams have the same name;
+- `check.latency_ewma` is outside 0..1;
+- an upstream `weight` is negative.
 
 ## 4. Health-check algorithm
 
@@ -175,21 +190,32 @@ Every `interval` the checker runs one cycle. In the cycle, all upstreams are che
 
 - A request counts as successful if it gets an HTTP response with status < 400.
 - The upstream passes the cycle if at least `required` of the M URLs succeeded (N of M).
-- The latency of the upstream is the average latency of the successful requests.
+- The latency of the upstream is the average latency of the successful requests. If `check.latency_ewma` is non-zero, this value is smoothed over time: `smoothed = ewma*new + (1-ewma)*old`.
 - The number of successful and total requests (`ok/total`), the check time and the last error are recorded.
 
 Example: with `required: 2` and three URLs, an upstream whose requests give 204, 200 and a timeout passes (2 of 3), and its latency is the average of the two successful requests. If only one request succeeds, it fails the cycle.
 
 ### Hysteresis
 
-- An upstream becomes healthy immediately after the first successful cycle. This gives a fast cold start: the first working upstream is usable as soon as the first cycle finishes.
-- A healthy upstream is marked down only after 2 consecutive failed cycles. A single transient error does not take an upstream out of service (anti-flapping).
+- An upstream becomes healthy after `check.up_threshold` consecutive successful cycles. With the default of 1 this gives a fast cold start: the first working upstream is usable as soon as the first cycle finishes.
+- A healthy upstream is marked down only after `check.down_threshold` consecutive failed cycles (default 2). A single transient error does not take an upstream out of service (anti-flapping).
 
-With the default `interval` of 15s, a dead upstream is therefore detected within roughly two intervals, plus the request timeouts.
+With the default `interval` of 15s and `down_threshold` of 2, a dead upstream is therefore detected within roughly two intervals, plus the request timeouts.
+
+### Passive health
+
+When a frontend (SOCKS5 or HTTP) fails to dial through the active upstream, the balancer triggers an out-of-band health re-check instead of waiting for the next `interval`. The trigger is rate-limited by `check.timeout` and coalesced, so a burst of failed dials causes at most one extra cycle.
+
+A failed dial does not mark the upstream down directly. The upstream is marked down only by the normal check cycles and `down_threshold`, so a single bad target host cannot eject a healthy upstream.
 
 ## 5. Selection strategy
 
-The strategy is minimum latency with a switch margin. The active upstream is the healthy one with the lowest latency, but to avoid flapping between proxies of similar speed, the selector switches only when:
+The strategy is priority tiers, then minimum latency with a switch margin.
+
+- Priority: only healthy upstreams in the best (lowest) `priority` tier are considered. Upstreams in higher-number tiers are standby: they are used only when no upstream in a better tier is healthy.
+- Weight: within the tier, the latency used for comparison is the measured latency divided by `weight`, so an upstream with a higher weight looks faster and is preferred.
+
+The active upstream is the one with the lowest (weight-adjusted) latency in that tier, but to avoid flapping between proxies of similar speed, the selector switches only when:
 
 1. the current upstream becomes unhealthy, or
 2. another healthy upstream is faster than the current one by more than `switch_margin`.
@@ -210,6 +236,8 @@ If no upstream is healthy, there is no active upstream and new connections fail 
 "X% faster" is computed as `(current - candidate) / current`. For example, `(200 - 120) / 200 = 0.4`.
 
 A lower `switch_margin` makes the balancer follow the fastest upstream more eagerly; a higher one makes it stickier.
+
+Smoothing the measured latency with `check.latency_ewma` (for example `0.3`) also reduces switching caused by short latency spikes.
 
 ## 6. Frontends
 
@@ -234,6 +262,7 @@ A minimal inbound SOCKS5 server: no authentication, CONNECT command only.
 | Active | Badge on the upstream currently used for all connections |
 | Name | Upstream name |
 | Address | Upstream SOCKS5 address |
+| Prio/Wt | Upstream `priority` and `weight` |
 | Health | up or down |
 | Latency | Average latency of successful requests, `-` if not measured |
 | OK/Total | Successful requests out of all check URLs in the last cycle |
@@ -247,12 +276,16 @@ A minimal inbound SOCKS5 server: no authentication, CONNECT command only.
   {
     "Name": "xray-1",
     "Addr": "127.0.0.1:11080",
+    "Priority": 0,
+    "Weight": 1,
     "Healthy": true,
     "Latency": 143000000,
     "OK": 3,
     "Total": 3,
     "LastErr": "",
     "CheckedAt": "2025-01-01T12:00:00.123456789+03:00",
+    "CheckTotal": 120,
+    "CheckFailures": 2,
     "Active": true
   }
 ]
@@ -262,18 +295,55 @@ A minimal inbound SOCKS5 server: no authentication, CONNECT command only.
 |-------|------|---------|
 | `Name` | string | Upstream name |
 | `Addr` | string | Upstream SOCKS5 address |
+| `Priority` | number | Configured `priority` |
+| `Weight` | number | Configured `weight` |
 | `Healthy` | bool | Current health state (after hysteresis) |
 | `Latency` | number | Average latency in nanoseconds (Go `time.Duration`); 143000000 is 143 ms |
 | `OK` | number | Successful check requests in the last cycle |
 | `Total` | number | Total check requests in the last cycle |
 | `LastErr` | string | Last error text, empty if none |
 | `CheckedAt` | string | Time of the last check (RFC 3339); a zero time means never checked |
+| `CheckTotal` | number | Total check cycles run for the upstream |
+| `CheckFailures` | number | Total failed check cycles for the upstream |
 | `Active` | bool | True for the upstream currently in use |
 
 Quick query:
 
 ```
 curl -s http://127.0.0.1:10802/status.json
+```
+
+### /metrics
+
+`GET http://<listen.status>/metrics` returns metrics in the Prometheus text format.
+
+| Metric | Type | Labels | Meaning |
+|--------|------|--------|---------|
+| `balancer_switches_total` | counter | none | Active upstream changes |
+| `balancer_frontend_dial_errors_total` | counter | none | Failed dials to the active upstream (both frontends) |
+| `balancer_frontend_connections_total` | counter | `frontend` (`socks5`, `http`) | Accepted frontend connections |
+| `balancer_frontend_active_connections` | gauge | `frontend` (`socks5`, `http`) | Open frontend connections |
+| `balancer_upstream_up` | gauge | `name` | 1 if the upstream is healthy, 0 if down |
+| `balancer_upstream_latency_ms` | gauge | `name` | Last measured latency in milliseconds |
+| `balancer_upstream_checks_total` | counter | `name` | Total check cycles run for the upstream |
+| `balancer_upstream_check_failures_total` | counter | `name` | Total failed check cycles for the upstream |
+| `balancer_active_upstream` | gauge | `name` | 1 for the currently active upstream, 0 otherwise |
+
+Example Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: proxy-socks5-balancer
+    static_configs:
+      - targets: ["127.0.0.1:10802"]
+```
+
+### /healthz
+
+`GET http://<listen.status>/healthz` returns HTTP 200 with a body starting with `ok` (it also reports the number of healthy upstreams) when at least one upstream is healthy, and HTTP 503 otherwise. Use it for load balancers, systemd or monitoring checks:
+
+```
+curl -fs http://127.0.0.1:10802/healthz
 ```
 
 ## 8. Signals
@@ -344,7 +414,7 @@ No upstream is currently healthy, so there is no active upstream. Open the statu
 
 ### All upstreams are down at startup
 
-The first cycle runs right after start. An upstream becomes healthy after the first successful cycle, so a short delay is normal. If it persists, see the previous section. Remember that a down mark needs 2 consecutive failed cycles, but an up mark needs only one.
+The first cycle runs right after start. An upstream becomes healthy after the first successful cycle, so a short delay is normal. If it persists, see the previous section. Remember that with the defaults a down mark needs 2 consecutive failed cycles (`down_threshold`), but an up mark needs only one (`up_threshold`).
 
 ### The active upstream does not change to a faster one
 
@@ -352,7 +422,7 @@ This is expected when the faster one is not faster by more than `switch_margin`.
 
 ### The active upstream flaps
 
-Increase `switch_margin` or `check.interval`, or add more `check.urls` and increase `required` so that single slow responses matter less.
+Increase `switch_margin` or `check.interval`, or add more `check.urls` and increase `required` so that single slow responses matter less. Setting `check.latency_ewma` (for example `0.3`) smooths latency, and a higher `check.down_threshold` makes the health state less sensitive to single failed cycles.
 
 ### Reload does not apply
 
@@ -365,6 +435,7 @@ The process exits on config errors and when a listener cannot start (for example
 ### How to read the status page
 
 - The row with the `active` badge is the upstream carrying all traffic.
+- Prio/Wt shows `priority/weight`; an upstream in a higher-number tier is standby while a better tier has a healthy upstream.
 - Health `down` with a last error explains why the upstream failed its cycles.
 - `OK/Total` of `1/3` with `required: 2` means the upstream failed the cycle.
 - Latency of `-` means no successful measurement yet.
