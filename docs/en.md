@@ -214,7 +214,7 @@ Loading fails (at startup the process exits; on reload the error is logged and t
 
 Every `interval` the checker runs one cycle. In the cycle, all upstreams are checked in parallel. For each upstream, every URL from `check.urls` is fetched through that upstream's SOCKS5 with a per-request `timeout`.
 
-- A request counts as successful if it gets an HTTP response with status < 400.
+- A request counts as successful if it gets an HTTP response with status < 400, so any 2xx or 3xx code passes. Redirects are not followed: a `301`/`302` from the probe URL already proves the upstream reached the origin, and following it could land on an unrelated page (login, captive portal) and fail the check.
 - The upstream passes the cycle if at least `required` of the M URLs succeeded (N of M).
 - The latency of the upstream is the average latency of the successful requests. If `check.latency_ewma` is non-zero, this value is smoothed over time: `smoothed = ewma*new + (1-ewma)*old`.
 - The number of successful and total requests (`ok/total`), the check time and the last error are recorded.

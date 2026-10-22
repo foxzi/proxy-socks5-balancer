@@ -105,6 +105,12 @@ func (c *Checker) probe(ctx context.Context, u *upstream.Upstream, s *Settings) 
 			DialContext:       u.DialContext,
 			DisableKeepAlives: true,
 		},
+		// Do not follow redirects: a 3xx already proves the upstream reached
+		// the origin, and following it could land on an unrelated page (login,
+		// captive portal, a host the proxy cannot reach) and fail the check.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 
 	var ok int
@@ -123,6 +129,8 @@ func (c *Checker) probe(ctx context.Context, u *upstream.Upstream, s *Settings) 
 			continue
 		}
 		resp.Body.Close()
+		// 2xx and 3xx count as success (many probe URLs answer with 301/302);
+		// only 4xx/5xx mark the URL as failed.
 		if resp.StatusCode >= 400 {
 			lastErr = "http " + resp.Status
 			continue
