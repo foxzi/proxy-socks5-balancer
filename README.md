@@ -46,6 +46,9 @@ Edit `config.yaml` (list your local SOCKS5 upstreams), then run:
 ./balancer -config config.yaml
 ```
 
+Check the build version with `./balancer -version` (it is also logged at
+startup and shown in the status page footer).
+
 Browser setup:
 
 - SOCKS5 proxy: `127.0.0.1:10800`, or
@@ -60,10 +63,15 @@ A systemd unit is provided in `deploy/proxy-socks5-balancer.service` (binary at 
 Build `.deb` and `.rpm` packages with [nfpm](https://nfpm.goreleaser.com/) running in Docker (nothing to install on the host):
 
 ```sh
-VERSION=0.1.0 deploy/build-packages.sh
+git tag -a v0.1.0 -m "release 0.1.0"   # version comes from the git tag
+deploy/build-packages.sh
 # -> dist/proxy-socks5-balancer_0.1.0_amd64.deb
 # -> dist/proxy-socks5-balancer-0.1.0-1.x86_64.rpm
 ```
+
+The version is derived from `git describe --tags`; override it explicitly with
+`VERSION=1.2.3 deploy/build-packages.sh`. It is stamped into the binary
+(`-version`) and used as the package version.
 
 Install:
 

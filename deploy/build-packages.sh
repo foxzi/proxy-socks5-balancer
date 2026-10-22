@@ -1,21 +1,36 @@
 #!/bin/sh
 # Build the binary and produce .deb and .rpm packages via nfpm (in Docker).
-# Usage: VERSION=0.1.0 deploy/build-packages.sh
+#
+# The version is taken from the git tag by default (git describe), so tag a
+# release first:
+#
+#	git tag -a v0.2.0 -m "release 0.2.0"
+#	deploy/build-packages.sh
+#
+# Override explicitly with VERSION=1.2.3 deploy/build-packages.sh
 set -e
 
-VERSION="${VERSION:-0.1.0}"
 cd "$(dirname "$0")/.."
+
+# Derive the version from git when not given. "git describe" yields e.g.
+# v0.2.0 on a tag, or v0.2.0-3-gabc123 a few commits later. Strip the leading
+# "v" so package versions are clean (0.2.0). Fall back to 0.0.0 with no tags.
+if [ -z "$VERSION" ]; then
+	VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0)"
+fi
+PKG_VERSION="$(printf '%s' "$VERSION" | sed 's/^v//')"
 
 echo ">> building binary (version $VERSION)"
 mkdir -p dist
 CGO_ENABLED=0 GOPROXY=off GOSUMDB=off \
-	go build -trimpath -ldflags "-s -w" \
+	go build -trimpath \
+	-ldflags "-s -w -X proxy-socks5-balancer/internal/version.Version=$PKG_VERSION" \
 	-o dist/proxy-socks5-balancer ./cmd/balancer
 
 echo ">> packaging deb + rpm"
 for pkg in deb rpm; do
 	docker run --rm \
-		-e VERSION="$VERSION" \
+		-e VERSION="$PKG_VERSION" \
 		-w /work -v "$PWD":/work \
 		goreleaser/nfpm package \
 		--config nfpm.yaml --target dist --packager "$pkg"

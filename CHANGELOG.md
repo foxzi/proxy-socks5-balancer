@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Added
+
+- Build-time version stamping. The binary reports its version via `-version`,
+  logs it at startup and shows it in the status page footer. The version is
+  taken from the git tag (`git describe`) and injected with `-ldflags`;
+  `deploy/build-packages.sh` uses it for the binary and the deb/rpm version.
+
+### Changed
+
+- Health check accepts any `2xx`/`3xx` probe response and no longer follows
+  redirects, so a `301`/`302` from a probe URL counts as success.
 
 ## [0.1.0] - 2026-10-22
 

@@ -474,10 +474,12 @@ Both packages are built from a single `nfpm.yaml` description with [nfpm](https:
 Build:
 
 ```sh
-VERSION=0.1.0 deploy/build-packages.sh
+git tag -a v0.1.0 -m "release 0.1.0"
+deploy/build-packages.sh
 ```
 
-The script builds the binary (`CGO_ENABLED=0`, from the local module cache) into `dist/`, then runs nfpm twice and produces:
+The version is taken from the git tag via `git describe --tags`; set
+`VERSION=1.2.3` to override it. The script builds the binary (`CGO_ENABLED=0`, from the local module cache) into `dist/`, stamps the version into it (`-ldflags -X .../version.Version`), then runs nfpm twice and produces:
 
 - `dist/proxy-socks5-balancer_0.1.0_amd64.deb`
 - `dist/proxy-socks5-balancer-0.1.0-1.x86_64.rpm`

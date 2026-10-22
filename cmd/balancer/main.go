@@ -18,11 +18,18 @@ import (
 	"proxy-socks5-balancer/internal/selector"
 	"proxy-socks5-balancer/internal/status"
 	"proxy-socks5-balancer/internal/upstream"
+	"proxy-socks5-balancer/internal/version"
 )
 
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.Version)
+		return
+	}
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -76,7 +83,7 @@ func main() {
 
 	go handleReload(ctx, *cfgPath, sel, chk, runner)
 
-	slog.Info("balancer started", "upstreams", len(cfg.Upstreams),
+	slog.Info("balancer started", "version", version.Version, "upstreams", len(cfg.Upstreams),
 		"socks5", cfg.Listen.SOCKS5, "http", cfg.Listen.HTTP, "status", cfg.Listen.Status)
 	<-ctx.Done()
 	slog.Info("shutting down")

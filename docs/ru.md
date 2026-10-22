@@ -474,10 +474,12 @@ sudo systemctl enable --now proxy-socks5-balancer
 Сборка:
 
 ```sh
-VERSION=0.1.0 deploy/build-packages.sh
+git tag -a v0.1.0 -m "release 0.1.0"
+deploy/build-packages.sh
 ```
 
-Скрипт собирает бинарь (`CGO_ENABLED=0`, из локального кэша модулей) в `dist/`, затем прогоняет nfpm дважды и кладёт туда:
+Версия берётся из git-тега через `git describe --tags`; переопределить можно
+переменной `VERSION=1.2.3`. Скрипт собирает бинарь (`CGO_ENABLED=0`, из локального кэша модулей) в `dist/`, вшивает в него версию (`-ldflags -X .../version.Version`), затем прогоняет nfpm дважды и кладёт туда:
 
 - `dist/proxy-socks5-balancer_0.1.0_amd64.deb`
 - `dist/proxy-socks5-balancer-0.1.0-1.x86_64.rpm`

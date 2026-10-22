@@ -14,6 +14,7 @@ import (
 	"proxy-socks5-balancer/internal/metrics"
 	"proxy-socks5-balancer/internal/selector"
 	"proxy-socks5-balancer/internal/upstream"
+	"proxy-socks5-balancer/internal/version"
 )
 
 // Server serves a simple status page and a JSON endpoint.
@@ -82,15 +83,17 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := struct {
-		Rows   []row
-		SOCKS5 string
-		HTTP   string
-		Now    string
+		Rows    []row
+		SOCKS5  string
+		HTTP    string
+		Now     string
+		Version string
 	}{
-		Rows:   s.rows(),
-		SOCKS5: s.Listen.SOCKS5,
-		HTTP:   s.Listen.HTTP,
-		Now:    time.Now().Format("15:04:05"),
+		Rows:    s.rows(),
+		SOCKS5:  s.Listen.SOCKS5,
+		HTTP:    s.Listen.HTTP,
+		Now:     time.Now().Format("15:04:05"),
+		Version: version.Version,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := pageTmpl.Execute(w, data); err != nil {
@@ -245,6 +248,6 @@ const pageHTML = `<!DOCTYPE html>
   </tr>
   {{end}}
 </table>
-<footer>auto-refresh 5s &middot; rendered {{.Now}} &middot; <a style="color:#7fd3ff" href="/status.json">status.json</a></footer>
+<footer>auto-refresh 5s &middot; rendered {{.Now}} &middot; v{{.Version}} &middot; <a style="color:#7fd3ff" href="/status.json">status.json</a></footer>
 </body>
 </html>`
