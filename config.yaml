@@ -40,3 +40,7 @@ upstreams:
     socks5: "127.0.0.1:11081"
     priority: 0
     weight: 1
+  - name: xray-3
+    socks5: "127.0.0.1:11082"
+    priority: 0
+    weight: 1
