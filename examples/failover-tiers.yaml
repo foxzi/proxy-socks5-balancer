@@ -1,0 +1,19 @@
+# Primary/backup via priority tiers. Tier 0 is used while any tier-0 upstream is
+# healthy; tier 1 is only used when every tier-0 upstream is down. A recovering
+# tier-0 upstream preempts the backup immediately (ignores switch_margin).
+check:
+  interval: 10s
+  timeout: 5s
+  required: 1
+  urls:
+    - "https://www.google.com/generate_204"
+upstreams:
+  - name: primary-a
+    socks5: "127.0.0.1:11080"
+    priority: 0
+  - name: primary-b
+    socks5: "127.0.0.1:11081"
+    priority: 0
+  - name: backup
+    socks5: "127.0.0.1:11082"
+    priority: 1

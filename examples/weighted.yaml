@@ -1,0 +1,17 @@
+# Prefer a faster line within one tier. weight divides the measured latency used
+# for selection, so fast-line (weight 3) looks 3x faster than its raw latency.
+check:
+  interval: 15s
+  timeout: 5s
+  required: 1
+  switch_margin: 0.2
+  urls:
+    - "https://www.google.com/generate_204"
+    - "https://api.github.com"
+upstreams:
+  - name: fast-line
+    socks5: "127.0.0.1:11080"
+    weight: 3
+  - name: slow-line
+    socks5: "127.0.0.1:11081"
+    weight: 1

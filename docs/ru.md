@@ -39,6 +39,31 @@ proxy-socks5-balancer - сервис на Go (Go 1.24; зависимости: `
   status :10802  -> веб-страница, /status.json, /metrics, /healthz
 ```
 
+```mermaid
+flowchart LR
+    client["browser / program"]
+    subgraph balancer["balancer process"]
+        socks["SOCKS5 :10800"]
+        http["HTTP :10801"]
+        dial["dial function"]
+        selector["selector: priority tier + weighted latency"]
+        checker["checker: probe every interval"]
+        status["status :10802 - page, /status.json, /metrics, /healthz"]
+    end
+    up1["xray-1 SOCKS5 127.0.0.1:11080"]
+    up2["xray-2 SOCKS5 127.0.0.1:11081"]
+    client --> socks --> dial
+    client --> http --> dial
+    dial -->|current upstream| selector
+    dial -.on dial error.-> checker
+    checker -->|health + latency| selector
+    checker -.probe.-> up1
+    checker -.probe.-> up2
+    dial --> up1
+    dial --> up2
+    selector --> status
+```
+
 Компоненты:
 
 - `cmd/balancer/main.go`: точка входа, флаг `-config` (по умолчанию `config.yaml`), связывание компонентов, обработка сигналов.

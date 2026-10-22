@@ -1,0 +1,25 @@
+# Observability: JSON logs, a notify-on-switch hook, and a status/metrics port
+# exposed to a monitoring host. The on_switch hook receives the event via env
+# vars: BALANCER_OLD, BALANCER_OLD_ADDR, BALANCER_NEW, BALANCER_NEW_ADDR,
+# BALANCER_NEW_LATENCY_MS.
+listen:
+  socks5: "127.0.0.1:10800"
+  http:   "127.0.0.1:10801"
+  status: "0.0.0.0:10802"   # reachable from your monitoring host; firewall it
+log:
+  level: info
+  format: json
+check:
+  interval: 15s
+  timeout: 5s
+  required: 1
+  urls:
+    - "https://www.google.com/generate_204"
+on_switch:
+  command: 'logger -t balancer "switched to $BALANCER_NEW ($BALANCER_NEW_LATENCY_MS ms)"'
+  timeout: 10s
+upstreams:
+  - name: xray-1
+    socks5: "127.0.0.1:11080"
+  - name: xray-2
+    socks5: "127.0.0.1:11081"

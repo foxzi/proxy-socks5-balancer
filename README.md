@@ -4,6 +4,8 @@ A Go service that health-checks several local SOCKS5 proxies (provided by v2ray/
 
 Documentation: [English](docs/en.md) | [Russian](docs/ru.md)
 
+Example configs: [examples/](examples/) | Changes: [CHANGELOG.md](CHANGELOG.md)
+
 ## Features
 
 - One stable SOCKS5 port and one stable HTTP-proxy port (CONNECT tunneling and plain HTTP forwarding).
