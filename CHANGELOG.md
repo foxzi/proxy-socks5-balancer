@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Manual upstream override on the status page. Each row has a "Switch here"
+  button that pins the active upstream to that proxy and disables automatic
+  selection; a "Back to auto" button restores it. Served via `POST /pin`
+  (form field `name`) and `POST /auto`. The pin is kept by name so it survives
+  a config reload, falls back to the best healthy upstream while the pinned one
+  is down, and fires the `on_switch` hook like an automatic switch.
 - Build-time version stamping. The binary reports its version via `-version`,
   logs it at startup and shows it in the status page footer. The version is
   taken from the git tag (`git describe`) and injected with `-ldflags`;

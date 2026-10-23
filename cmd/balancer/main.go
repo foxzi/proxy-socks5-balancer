@@ -45,10 +45,11 @@ func main() {
 	mx := metrics.New()
 	runner := hook.New(hookConfig(cfg))
 	chk := checker.New(sel, checkSettings(cfg))
-	chk.OnSwitch = func(from, to *upstream.Upstream) {
+	onSwitch := func(from, to *upstream.Upstream) {
 		mx.Switch()
 		runner.Fire(switchEvent(from, to))
 	}
+	chk.OnSwitch = onSwitch
 
 	// Dial function used by both frontends: route through the active upstream.
 	// A dial failure pokes the checker to re-probe out of band, so a dead
@@ -76,6 +77,7 @@ func main() {
 	statusSrv := &status.Server{Addr: cfg.Listen.Status, Sel: sel, Metrics: mx}
 	statusSrv.Listen.SOCKS5 = cfg.Listen.SOCKS5
 	statusSrv.Listen.HTTP = cfg.Listen.HTTP
+	statusSrv.OnSwitch = onSwitch
 
 	go serve("socks5", func() error { return socks.ListenAndServe(ctx) }, stop)
 	go serve("http", func() error { return httpProxy.ListenAndServe(ctx) }, stop)

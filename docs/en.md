@@ -294,6 +294,11 @@ A minimal inbound SOCKS5 server: no authentication, CONNECT command only.
 | Latency | Average latency of successful requests, `-` if not measured |
 | OK/Total | Successful requests out of all check URLs in the last cycle |
 | Checked | Time since the last check, `never` if not checked yet; the last error, if any, is shown under this value |
+| Control | "Switch here" button to pin this upstream as active (manual override); shows "pinned" for the currently pinned one |
+
+The "Switch here" button pins the active upstream to the chosen proxy (manual override) and disables automatic latency-based selection. While an upstream is pinned, a banner with a "Back to auto" button appears at the top of the page; it clears the pin and restores automatic selection. The pin is stored by upstream name, so it survives a configuration reload (SIGHUP). If the pinned upstream becomes unhealthy, traffic temporarily falls back to the best healthy upstream, and the pin resumes automatically when the pinned upstream recovers. If the pinned upstream is removed from the configuration on reload, the pin is cleared. A manual switch fires the `on_switch` hook and increments the switch metrics, the same as an automatic switch.
+
+The buttons use two POST endpoints on the status server: `POST /pin` with the form field `name` pins the upstream with that name, and `POST /auto` clears the pin. They are POST so that the 5-second page auto-refresh cannot trigger them.
 
 `http://<listen.status>/status.json` returns the same data as a JSON array, one object per upstream:
 

@@ -26,6 +26,10 @@ type Server struct {
 		SOCKS5 string
 		HTTP   string
 	}
+	// OnSwitch, if set, is called when a manual pin/unpin changes the active
+	// upstream, mirroring the checker's hook so metrics and the on_switch
+	// command fire for manual switches too.
+	OnSwitch func(from, to *upstream.Upstream)
 }
 
 func (s *Server) ListenAndServe(ctx context.Context) error {
@@ -34,6 +38,8 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	mux.HandleFunc("/status.json", s.handleJSON)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/pin", s.handlePin)
+	mux.HandleFunc("/auto", s.handleAuto)
 
 	srv := &http.Server{Addr: s.Addr, Handler: mux}
 	lc := net.ListenConfig{}
@@ -58,14 +64,17 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 type row struct {
 	upstream.Snapshot
 	Active bool
+	Pinned bool
 }
 
 func (s *Server) rows() []row {
 	cur := s.Sel.Current()
+	pinned := s.Sel.PinnedName()
 	ups := s.Sel.Upstreams()
 	out := make([]row, 0, len(ups))
 	for _, u := range ups {
-		out = append(out, row{Snapshot: u.Snapshot(), Active: u == cur})
+		sn := u.Snapshot()
+		out = append(out, row{Snapshot: sn, Active: u == cur, Pinned: sn.Name == pinned})
 	}
 	return out
 }
@@ -88,17 +97,54 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		HTTP    string
 		Now     string
 		Version string
+		Pinned  string
 	}{
 		Rows:    s.rows(),
 		SOCKS5:  s.Listen.SOCKS5,
 		HTTP:    s.Listen.HTTP,
 		Now:     time.Now().Format("15:04:05"),
 		Version: version.Version,
+		Pinned:  s.Sel.PinnedName(),
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := pageTmpl.Execute(w, data); err != nil {
 		slog.Error("status template error", "err", err)
 	}
+}
+
+// handlePin forces the active upstream to the one named in the "name" form
+// field (manual override). It is a POST so the 5s page refresh cannot trigger
+// it, then redirects back to the status page.
+func (s *Server) handlePin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name := r.FormValue("name")
+	changed, from, to, ok := s.Sel.Pin(name)
+	if !ok {
+		http.Error(w, "unknown upstream", http.StatusBadRequest)
+		return
+	}
+	slog.Info("manual pin", "upstream", name, "changed", changed)
+	if changed && s.OnSwitch != nil {
+		s.OnSwitch(from, to)
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleAuto clears the manual pin and returns to automatic selection.
+func (s *Server) handleAuto(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	changed, from, to := s.Sel.Unpin()
+	slog.Info("manual unpin", "changed", changed)
+	if changed && s.OnSwitch != nil {
+		s.OnSwitch(from, to)
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // handleHealthz returns 200 when at least one upstream is healthy, else 503.
@@ -223,6 +269,15 @@ const pageHTML = `<!DOCTYPE html>
   .badge { background:#238636; color:#fff; padding:.1rem .5rem; border-radius:10px; font-size:.75rem; }
   .err { color:#f0883e; font-size:.8rem; }
   footer { margin-top:1.2rem; color:#6b7684; font-size:.8rem; }
+  button { font: inherit; cursor: pointer; border: none; border-radius: 5px; padding: .3rem .7rem; font-size:.8rem; }
+  .btn-pin { background:#30455e; color:#cfe3ff; }
+  .btn-pin:hover { background:#3c577a; }
+  .btn-auto { background:#8a5a1a; color:#ffe6c7; }
+  .btn-auto:hover { background:#a66c20; }
+  .pinbar { max-width:820px; margin-bottom:1rem; padding:.6rem .9rem; border-radius:6px; background:#2a1e12; border:1px solid #5a3d1a; color:#f0c58a; font-size:.85rem; display:flex; align-items:center; gap:.8rem; }
+  .pinbar form { margin:0; }
+  td form { margin:0; }
+  td.cur { color:#6b7684; font-size:.8rem; }
 </style>
 </head>
 <body>
@@ -230,10 +285,16 @@ const pageHTML = `<!DOCTYPE html>
 <div class="ports">
   SOCKS5: <code>{{.SOCKS5}}</code>&nbsp;&nbsp;HTTP: <code>{{.HTTP}}</code>
 </div>
+{{if .Pinned}}
+<div class="pinbar">
+  <span>Manual override: pinned to <strong>{{.Pinned}}</strong> (automatic selection disabled)</span>
+  <form method="post" action="/auto"><button class="btn-auto" type="submit">Back to auto</button></form>
+</div>
+{{end}}
 <table>
   <tr>
     <th>Active</th><th>Name</th><th>Address</th><th>Prio/Wt</th><th>Health</th>
-    <th>Latency</th><th>OK/Total</th><th>Checked</th>
+    <th>Latency</th><th>OK/Total</th><th>Checked</th><th>Control</th>
   </tr>
   {{range .Rows}}
   <tr class="{{if .Active}}active{{end}}">
@@ -245,6 +306,7 @@ const pageHTML = `<!DOCTYPE html>
     <td>{{ms .Latency}}</td>
     <td>{{.OK}}/{{.Total}}</td>
     <td>{{ago .CheckedAt}}{{if .LastErr}}<div class="err">{{.LastErr}}</div>{{end}}</td>
+    <td>{{if .Pinned}}<span class="cur">pinned</span>{{else}}<form method="post" action="/pin"><input type="hidden" name="name" value="{{.Name}}"><button class="btn-pin" type="submit">Switch here</button></form>{{end}}</td>
   </tr>
   {{end}}
 </table>

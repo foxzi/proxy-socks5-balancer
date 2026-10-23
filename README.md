@@ -123,7 +123,12 @@ Validation fails on: no upstreams, no check URLs, `required` greater than the nu
 
 `http://<listen.status>/` shows, for each upstream: name, address, priority/weight, health (up/down), latency, ok/total, last check time and last error, and marks the active upstream. `http://<listen.status>/status.json` returns the same data as JSON.
 
+Each row has a **Switch here** button that pins the active upstream to that proxy (manual override), disabling automatic selection. A banner at the top shows the current pin and a **Back to auto** button restores automatic selection. The pin is kept by name, so it survives a config reload; if the pinned upstream goes down, traffic temporarily falls back to the best healthy proxy and the pin resumes once it recovers. A manual switch fires the `on_switch` hook just like an automatic one.
+
 The status server also exposes:
+
+- `POST /pin` (form field `name`): pin the active upstream to the named proxy. Used by the status page button.
+- `POST /auto`: clear the pin and return to automatic selection.
 
 - `GET /metrics`: Prometheus text-format metrics, e.g. `balancer_upstream_up{name="xray-1"}` (1 healthy / 0 down), `balancer_upstream_latency_ms{name="xray-1"}`, `balancer_frontend_connections_total{frontend="socks5"}`, `balancer_frontend_dial_errors_total`.
 - `GET /healthz`: 200 (body starts with `ok`) when at least one upstream is healthy, otherwise 503. Useful for load balancers, systemd and monitoring.
