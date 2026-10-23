@@ -1,5 +1,9 @@
 # proxy-socks5-balancer
 
+[![CI](https://github.com/foxzi/proxy-socks5-balancer/actions/workflows/ci.yml/badge.svg)](https://github.com/foxzi/proxy-socks5-balancer/actions/workflows/ci.yml)
+[![Release](https://github.com/foxzi/proxy-socks5-balancer/actions/workflows/release.yml/badge.svg)](https://github.com/foxzi/proxy-socks5-balancer/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A Go service that health-checks several local SOCKS5 proxies (provided by v2ray/xray instances) and publishes one stable SOCKS5 port and one stable HTTP-proxy port that always route through the fastest working upstream. Configure the browser or program once; the balancer switches the upstream transparently when one fails or a faster one appears.
 
 Documentation: [English](docs/en.md) | [Russian](docs/ru.md)
@@ -57,6 +61,26 @@ Browser setup:
 Status page: http://127.0.0.1:10802
 
 A systemd unit is provided in `deploy/proxy-socks5-balancer.service` (binary at `/usr/bin/proxy-socks5-balancer`, config at `/etc/proxy-socks5-balancer/config.yaml`, user `proxy-balancer`).
+
+## Install from releases
+
+Prebuilt `.deb`, `.rpm` and raw binary tarballs for `linux/amd64` and
+`linux/arm64` are attached to each [GitHub release](https://github.com/foxzi/proxy-socks5-balancer/releases),
+built automatically by CI when a `vX.Y.Z` tag is pushed.
+
+```
+# Debian/Ubuntu (amd64)
+sudo dpkg -i proxy-socks5-balancer_<version>_amd64.deb
+
+# Fedora/RHEL (x86_64)
+sudo rpm -i proxy-socks5-balancer-<version>-1.x86_64.rpm
+```
+
+The package installs the binary, a `config|noreplace` config, the systemd unit
+and the docs. Enable it with `sudo systemctl enable --now proxy-socks5-balancer`.
+
+To build packages locally instead, use `deploy/build-packages.sh` (needs Docker)
+or run `nfpm` directly against `nfpm.yaml`.
 
 ## Packages (deb / rpm)
 
