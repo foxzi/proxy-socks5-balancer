@@ -9,7 +9,7 @@ description: |
   SOCKS5/HTTP balancer in front of local xray/v2ray upstreams.
   Health-checks upstreams over several test sites and publishes stable
   SOCKS5 and HTTP ports plus a web status page.
-homepage: https://github.com/piligrim/proxy-socks5-balancer
+homepage: https://github.com/foxzi/proxy-socks5-balancer
 license: MIT
 
 contents:

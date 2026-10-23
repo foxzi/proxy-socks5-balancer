@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Derive version
+        id: ver
+        run: |
+          raw="${GITHUB_REF_NAME}"
+          echo "version=${raw#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build packages
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -eu
+          mkdir -p dist out
+          for arch in amd64 arm64; do
+            echo ">> building $arch"
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+              go build -trimpath \
+              -ldflags "-s -w -X proxy-socks5-balancer/internal/version.Version=${VERSION}" \
+              -o dist/proxy-socks5-balancer ./cmd/balancer
+
+            tar -czf "out/proxy-socks5-balancer_${VERSION}_linux_${arch}.tar.gz" \
+              -C dist proxy-socks5-balancer
+
+            for pkg in deb rpm; do
+              ARCH="$arch" VERSION="$VERSION" \
+                nfpm package --config nfpm.yaml --target out --packager "$pkg"
+            done
+          done
+          echo ">> artifacts:"
+          ls -1 out
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
