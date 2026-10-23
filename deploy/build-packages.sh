@@ -20,9 +20,19 @@ if [ -z "$VERSION" ]; then
 fi
 PKG_VERSION="$(printf '%s' "$VERSION" | sed 's/^v//')"
 
-echo ">> building binary (version $VERSION)"
+# Target package architecture (Debian naming: amd64, arm64, ...). Defaults to
+# the host arch. GOARCH is derived from it so the binary matches the package.
+ARCH="${ARCH:-$(dpkg --print-architecture 2>/dev/null || echo amd64)}"
+case "$ARCH" in
+amd64) GOARCH=amd64 ;;
+arm64) GOARCH=arm64 ;;
+armhf) GOARCH=arm ;;
+*) GOARCH="$ARCH" ;;
+esac
+
+echo ">> building binary (version $VERSION, arch $ARCH/$GOARCH)"
 mkdir -p dist
-CGO_ENABLED=0 GOPROXY=off GOSUMDB=off \
+CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" GOPROXY=off GOSUMDB=off \
 	go build -trimpath \
 	-ldflags "-s -w -X proxy-socks5-balancer/internal/version.Version=$PKG_VERSION" \
 	-o dist/proxy-socks5-balancer ./cmd/balancer
@@ -30,7 +40,7 @@ CGO_ENABLED=0 GOPROXY=off GOSUMDB=off \
 echo ">> packaging deb + rpm"
 for pkg in deb rpm; do
 	docker run --rm \
-		-e VERSION="$PKG_VERSION" \
+		-e VERSION="$PKG_VERSION" -e ARCH="$ARCH" \
 		-w /work -v "$PWD":/work \
 		goreleaser/nfpm package \
 		--config nfpm.yaml --target dist --packager "$pkg"

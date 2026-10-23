@@ -1,5 +1,5 @@
 name: proxy-socks5-balancer
-arch: amd64
+arch: ${ARCH}
 platform: linux
 version: ${VERSION}
 section: net
