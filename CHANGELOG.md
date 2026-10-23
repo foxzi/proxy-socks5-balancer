@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-23
+
+### Added
+
+- GitHub Actions CI (`gofmt`, `go vet`, race tests, build) on push and pull
+  requests.
+- GitHub Actions release workflow that builds `linux/amd64` and `linux/arm64`
+  binaries, `.deb`/`.rpm` packages via nfpm and `.tar.gz` archives, then
+  attaches them to a GitHub release on `vX.Y.Z` tags.
+- `LICENSE` file (MIT), CI/release badges and an "Install from releases"
+  section in the README.
+
+### Fixed
+
+- `nfpm.yaml` homepage now points at the real repository.
+
 ## [0.2.0] - 2026-10-23
 
 ### Added
@@ -63,5 +79,7 @@ port that always route through the fastest healthy upstream.
   `config.yaml`, example configurations under `examples/`, and an
   architecture diagram.
 
-[Unreleased]: https://example.com/compare/v0.1.0...HEAD
-[0.1.0]: https://example.com/releases/tag/v0.1.0
+[Unreleased]: https://github.com/foxzi/proxy-socks5-balancer/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/foxzi/proxy-socks5-balancer/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/foxzi/proxy-socks5-balancer/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/foxzi/proxy-socks5-balancer/releases/tag/v0.1.0
