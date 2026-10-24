@@ -91,9 +91,11 @@ func (u *Upstream) DialContext(ctx context.Context, network, addr string) (net.C
 }
 
 // Report records the outcome of a check cycle and applies hysteresis.
-func (u *Upstream) Report(ok, total int, latency time.Duration, lastErr string) {
+// It returns true when the healthy state flipped in this call.
+func (u *Upstream) Report(ok, total int, latency time.Duration, lastErr string) bool {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	was := u.healthy
 	u.okCount = ok
 	u.total = total
 	u.checkedAt = time.Now()
@@ -124,6 +126,7 @@ func (u *Upstream) Report(ok, total int, latency time.Duration, lastErr string) 
 			u.healthy = false
 		}
 	}
+	return u.healthy != was
 }
 
 // Snapshot is an immutable view of the upstream state for status/selection.

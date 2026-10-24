@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,6 +91,8 @@ func (c *Checker) cycle(ctx context.Context) {
 	if changed, from, to := c.sel.Reselect(); changed {
 		slog.Info("active upstream changed",
 			"from", name(from), "to", name(to),
+			"reason", c.switchReason(from, to),
+			"from_latency_ms", latencyMS(from),
 			"latency_ms", latencyMS(to))
 		if c.OnSwitch != nil {
 			c.OnSwitch(from, to)
@@ -115,24 +118,24 @@ func (c *Checker) probe(ctx context.Context, u *upstream.Upstream, s *Settings) 
 
 	var ok int
 	var totalLatency time.Duration
-	var lastErr string
+	var errs []string // "url: error" for every failed URL in this cycle
 	for _, url := range s.URLs {
 		start := time.Now()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			lastErr = err.Error()
+			errs = append(errs, url+": "+err.Error())
 			continue
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			lastErr = err.Error()
+			errs = append(errs, url+": "+err.Error())
 			continue
 		}
 		resp.Body.Close()
 		// 2xx and 3xx count as success (many probe URLs answer with 301/302);
 		// only 4xx/5xx mark the URL as failed.
 		if resp.StatusCode >= 400 {
-			lastErr = "http " + resp.Status
+			errs = append(errs, url+": http "+resp.Status)
 			continue
 		}
 		ok++
@@ -144,16 +147,48 @@ func (c *Checker) probe(ctx context.Context, u *upstream.Upstream, s *Settings) 
 		latency = totalLatency / time.Duration(ok)
 	}
 	passed := ok >= s.Required
-	if passed {
-		lastErr = "" // empty error signals a passing cycle to Report
+	lastErr := ""
+	if !passed {
+		lastErr = strings.Join(errs, "; ")
 	}
-	u.Report(ok, len(s.URLs), latency, lastErr)
+	flipped := u.Report(ok, len(s.URLs), latency, lastErr)
+	healthy := u.Healthy()
 
-	slog.Debug("checked upstream",
+	attrs := []any{
 		"upstream", u.Name, "addr", u.Addr,
-		"ok", ok, "total", len(s.URLs),
+		"ok", ok, "total", len(s.URLs), "required", s.Required,
 		"latency_ms", latency.Milliseconds(),
-		"healthy", u.Healthy(), "passed", passed)
+	}
+	switch {
+	case flipped && healthy:
+		slog.Info("upstream up", attrs...)
+	case flipped:
+		slog.Warn("upstream down", append(attrs, "errors", lastErr)...)
+	case !passed:
+		// Failed cycle that did not (yet) flip the state, e.g. below
+		// down_threshold: the first sign of a degrading upstream.
+		slog.Warn("upstream check failed", append(attrs, "healthy", healthy, "errors", lastErr)...)
+	default:
+		slog.Debug("checked upstream", append(attrs, "healthy", healthy, "errors", strings.Join(errs, "; "))...)
+	}
+}
+
+// switchReason explains why the selector moved from one upstream to another.
+func (c *Checker) switchReason(from, to *upstream.Upstream) string {
+	switch {
+	case to == nil:
+		return "no healthy upstream"
+	case from == nil:
+		return "initial"
+	case c.sel.PinnedName() == to.Name:
+		return "pinned"
+	case !from.Healthy():
+		return "previous down"
+	case to.Priority < from.Priority:
+		return "better priority tier"
+	default:
+		return "faster"
+	}
 }
 
 func name(u *upstream.Upstream) string {

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Health-check logging at `info`/`warn` level: `upstream up`, `upstream down`
+  and `upstream check failed` with the error of every failed probe URL.
+- `active upstream changed` now logs the `reason` and the previous upstream
+  latency (`from_latency_ms`).
+
 ## [0.2.1] - 2026-10-23
 
 ### Added
