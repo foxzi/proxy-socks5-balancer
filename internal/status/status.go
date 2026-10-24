@@ -290,28 +290,39 @@ const pageHTML = `<!DOCTYPE html>
 <meta http-equiv="refresh" content="5">
 <title>proxy-socks5-balancer</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 2rem; background: #0f1419; color: #e6e6e6; }
+  body { font-family: system-ui, sans-serif; margin: 2rem auto; padding: 0 1rem; max-width: 1200px; background: #0f1419; color: #e6e6e6; }
   h1 { font-size: 1.3rem; }
   .ports { color: #9aa5b1; margin-bottom: 1.2rem; font-size: .9rem; }
   .ports code { background:#1c2330; padding:.1rem .4rem; border-radius:4px; color:#7fd3ff; }
-  table { border-collapse: collapse; width: 100%; max-width: 820px; }
-  th, td { text-align: left; padding: .55rem .8rem; border-bottom: 1px solid #222b38; }
+  .tbl { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid #222b38; white-space: nowrap; vertical-align: top; }
   th { color: #9aa5b1; font-weight: 600; font-size: .8rem; text-transform: uppercase; }
   .up { color: #3fb950; font-weight: 600; }
   .down { color: #f85149; font-weight: 600; }
   .active td { background: #16261b; }
   .badge { background:#238636; color:#fff; padding:.1rem .5rem; border-radius:10px; font-size:.75rem; }
-  .err { color:#f0883e; font-size:.8rem; }
+  .err { color:#f0883e; font-size:.8rem; white-space: normal; max-width: 22rem; word-break: break-word; }
   footer { margin-top:1.2rem; color:#6b7684; font-size:.8rem; }
   button { font: inherit; cursor: pointer; border: none; border-radius: 5px; padding: .3rem .7rem; font-size:.8rem; }
   .btn-pin { background:#30455e; color:#cfe3ff; }
   .btn-pin:hover { background:#3c577a; }
   .btn-auto { background:#8a5a1a; color:#ffe6c7; }
   .btn-auto:hover { background:#a66c20; }
-  .pinbar { max-width:820px; margin-bottom:1rem; padding:.6rem .9rem; border-radius:6px; background:#2a1e12; border:1px solid #5a3d1a; color:#f0c58a; font-size:.85rem; display:flex; align-items:center; gap:.8rem; }
+  .pinbar { margin-bottom:1rem; flex-wrap:wrap; padding:.6rem .9rem; border-radius:6px; background:#2a1e12; border:1px solid #5a3d1a; color:#f0c58a; font-size:.85rem; display:flex; align-items:center; gap:.8rem; }
   .pinbar form { margin:0; }
   td form { margin:0; }
-  td.cur { color:#6b7684; font-size:.8rem; }
+  .cur { color:#6b7684; font-size:.8rem; }
+  @media (max-width: 940px) {
+    body { margin: 1rem auto; }
+    table, tbody, tr, td { display: block; }
+    tr.head { display: none; }
+    tr { border: 1px solid #222b38; border-radius: 6px; margin-bottom: .8rem; padding: .3rem 0; }
+    td { display: flex; justify-content: space-between; gap: 1rem; border: none; padding: .3rem .8rem; white-space: normal; text-align: right; }
+    td::before { content: attr(data-label); color: #9aa5b1; font-size: .8rem; text-transform: uppercase; text-align: left; }
+    .active td { background: none; }
+    tr.active { background: #16261b; }
+  }
 </style>
 </head>
 <body>
@@ -326,26 +337,28 @@ const pageHTML = `<!DOCTYPE html>
   <form method="post" action="/auto"><button class="btn-auto" type="submit">Back to auto</button></form>
 </div>
 {{end}}
+<div class="tbl">
 <table>
-  <tr>
+  <tr class="head">
     <th>Active</th><th>Name</th><th>Address</th><th>Prio/Wt</th><th>Health</th>
     <th>Latency</th><th>OK/Total</th><th>Speed</th><th>Checked</th><th>Control</th>
   </tr>
   {{range .Rows}}
   <tr class="{{if .Active}}active{{end}}">
-    <td>{{if .Active}}<span class="badge">active</span>{{end}}</td>
-    <td>{{.Name}}</td>
-    <td>{{.Addr}}</td>
-    <td>{{.Priority}}/{{.Weight}}</td>
-    <td>{{if .Healthy}}<span class="up">up</span>{{else}}<span class="down">down</span>{{end}}</td>
-    <td>{{ms .Latency}}</td>
-    <td>{{.OK}}/{{.Total}}</td>
-    <td>&darr; {{rate .RxRate}}<br>&uarr; {{rate .TxRate}}<div class="cur">{{bytes .RxBytes}} / {{bytes .TxBytes}}</div></td>
-    <td>{{ago .CheckedAt}}{{if .LastErr}}<div class="err">{{.LastErr}}</div>{{end}}</td>
-    <td>{{if .Pinned}}<span class="cur">pinned</span>{{else}}<form method="post" action="/pin"><input type="hidden" name="name" value="{{.Name}}"><button class="btn-pin" type="submit">Switch here</button></form>{{end}}</td>
+    <td data-label="Active">{{if .Active}}<span class="badge">active</span>{{end}}</td>
+    <td data-label="Name">{{.Name}}</td>
+    <td data-label="Address">{{.Addr}}</td>
+    <td data-label="Prio/Wt">{{.Priority}}/{{.Weight}}</td>
+    <td data-label="Health">{{if .Healthy}}<span class="up">up</span>{{else}}<span class="down">down</span>{{end}}</td>
+    <td data-label="Latency">{{ms .Latency}}</td>
+    <td data-label="OK/Total">{{.OK}}/{{.Total}}</td>
+    <td data-label="Speed"><div>&darr; {{rate .RxRate}} &nbsp;&uarr; {{rate .TxRate}}<div class="cur">{{bytes .RxBytes}} / {{bytes .TxBytes}}</div></div></td>
+    <td data-label="Checked"><div>{{ago .CheckedAt}}{{if .LastErr}}<div class="err">{{.LastErr}}</div>{{end}}</div></td>
+    <td data-label="Control">{{if .Pinned}}<span class="cur">pinned</span>{{else}}<form method="post" action="/pin"><input type="hidden" name="name" value="{{.Name}}"><button class="btn-pin" type="submit">Switch here</button></form>{{end}}</td>
   </tr>
   {{end}}
 </table>
+</div>
 <footer>auto-refresh 5s &middot; rendered {{.Now}} &middot; v{{.Version}} &middot; <a style="color:#7fd3ff" href="/status.json">status.json</a></footer>
 </body>
 </html>`

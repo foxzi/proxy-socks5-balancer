@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Responsive status page: wider table without cell wrapping, horizontal
+  scroll as a fallback and a card layout on screens narrower than 940px.
+
 ## [0.2.2] - 2026-10-24
 
 ### Added
