@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-24
+
 ### Added
 
 - Health-check logging at `info`/`warn` level: `upstream up`, `upstream down`
@@ -93,7 +95,8 @@ port that always route through the fastest healthy upstream.
   `config.yaml`, example configurations under `examples/`, and an
   architecture diagram.
 
-[Unreleased]: https://github.com/foxzi/proxy-socks5-balancer/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/foxzi/proxy-socks5-balancer/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/foxzi/proxy-socks5-balancer/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/foxzi/proxy-socks5-balancer/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/foxzi/proxy-socks5-balancer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/foxzi/proxy-socks5-balancer/releases/tag/v0.1.0
