@@ -91,6 +91,7 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	rows := s.rows()
 	data := struct {
 		Rows    []row
 		SOCKS5  string
@@ -98,13 +99,19 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 		Now     string
 		Version string
 		Pinned  string
+		RxRate  int64
+		TxRate  int64
 	}{
-		Rows:    s.rows(),
+		Rows:    rows,
 		SOCKS5:  s.Listen.SOCKS5,
 		HTTP:    s.Listen.HTTP,
 		Now:     time.Now().Format("15:04:05"),
 		Version: version.Version,
 		Pinned:  s.Sel.PinnedName(),
+	}
+	for _, r := range rows {
+		data.RxRate += r.RxRate
+		data.TxRate += r.TxRate
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := pageTmpl.Execute(w, data); err != nil {
@@ -214,6 +221,12 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		sn := u.Snapshot()
 		fmt.Fprintf(&b, "balancer_upstream_check_failures_total{name=%q} %d\n", sn.Name, sn.CheckFailures)
 	}
+	fmt.Fprintf(&b, "# HELP balancer_upstream_bytes_total Bytes relayed through the upstream.\n# TYPE balancer_upstream_bytes_total counter\n")
+	for _, u := range ups {
+		sn := u.Snapshot()
+		fmt.Fprintf(&b, "balancer_upstream_bytes_total{name=%q,direction=\"rx\"} %d\n", sn.Name, sn.RxBytes)
+		fmt.Fprintf(&b, "balancer_upstream_bytes_total{name=%q,direction=\"tx\"} %d\n", sn.Name, sn.TxBytes)
+	}
 	fmt.Fprintf(&b, "# HELP balancer_active_upstream Whether the upstream is currently active (1) or not (0).\n# TYPE balancer_active_upstream gauge\n")
 	for _, u := range ups {
 		sn := u.Snapshot()
@@ -237,6 +250,25 @@ func ms(d time.Duration) string {
 	return fmt.Sprintf("%d ms", d.Milliseconds())
 }
 
+// rate formats a bytes-per-second value with a binary unit.
+func rate(bps int64) string {
+	return bytes(bps) + "/s"
+}
+
+// bytes formats a byte count with a binary unit.
+func bytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
 func ago(t time.Time) string {
 	if t.IsZero() {
 		return "never"
@@ -245,8 +277,10 @@ func ago(t time.Time) string {
 }
 
 var pageTmpl = template.Must(template.New("page").Funcs(template.FuncMap{
-	"ms":  ms,
-	"ago": ago,
+	"ms":    ms,
+	"ago":   ago,
+	"rate":  rate,
+	"bytes": bytes,
 }).Parse(pageHTML))
 
 const pageHTML = `<!DOCTYPE html>
@@ -284,6 +318,7 @@ const pageHTML = `<!DOCTYPE html>
 <h1>proxy-socks5-balancer</h1>
 <div class="ports">
   SOCKS5: <code>{{.SOCKS5}}</code>&nbsp;&nbsp;HTTP: <code>{{.HTTP}}</code>
+  &nbsp;&nbsp;Speed: <code>&darr; {{rate .RxRate}}</code> <code>&uarr; {{rate .TxRate}}</code>
 </div>
 {{if .Pinned}}
 <div class="pinbar">
@@ -294,7 +329,7 @@ const pageHTML = `<!DOCTYPE html>
 <table>
   <tr>
     <th>Active</th><th>Name</th><th>Address</th><th>Prio/Wt</th><th>Health</th>
-    <th>Latency</th><th>OK/Total</th><th>Checked</th><th>Control</th>
+    <th>Latency</th><th>OK/Total</th><th>Speed</th><th>Checked</th><th>Control</th>
   </tr>
   {{range .Rows}}
   <tr class="{{if .Active}}active{{end}}">
@@ -305,6 +340,7 @@ const pageHTML = `<!DOCTYPE html>
     <td>{{if .Healthy}}<span class="up">up</span>{{else}}<span class="down">down</span>{{end}}</td>
     <td>{{ms .Latency}}</td>
     <td>{{.OK}}/{{.Total}}</td>
+    <td>&darr; {{rate .RxRate}}<br>&uarr; {{rate .TxRate}}<div class="cur">{{bytes .RxBytes}} / {{bytes .TxBytes}}</div></td>
     <td>{{ago .CheckedAt}}{{if .LastErr}}<div class="err">{{.LastErr}}</div>{{end}}</td>
     <td>{{if .Pinned}}<span class="cur">pinned</span>{{else}}<form method="post" action="/pin"><input type="hidden" name="name" value="{{.Name}}"><button class="btn-pin" type="submit">Switch here</button></form>{{end}}</td>
   </tr>

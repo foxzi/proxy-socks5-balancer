@@ -8,6 +8,7 @@ listen:
 log:
   level: info            # debug | info | warn | error
   format: text           # text | json (json is handy for log collectors)
+  access: false          # log every finished proxied connection (restart to apply)
 
 check:
   interval: 15s          # how often to probe every upstream

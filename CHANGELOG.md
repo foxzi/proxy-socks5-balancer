@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `upstream check failed` with the error of every failed probe URL.
 - `active upstream changed` now logs the `reason` and the previous upstream
   latency (`from_latency_ms`).
+- Optional access log (`log.access: true`): every finished proxied connection
+  is logged at `info` level as `msg=access` with proto, client, target,
+  upstream, sent/received bytes and duration. Applied on restart only.
+- Per-upstream traffic speed and byte counters: total speed in the status page
+  header, a "Speed" column, `RxBytes`/`TxBytes`/`RxRate`/`TxRate` fields in
+  `/status.json` and the `balancer_upstream_bytes_total{name,direction}`
+  metric. Counters reset on reload and restart.
 
 ## [0.2.1] - 2026-10-23
 

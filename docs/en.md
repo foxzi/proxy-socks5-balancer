@@ -99,6 +99,7 @@ listen:
 log:
   level: info
   format: text
+  access: false
 check:
   interval: 15s
   timeout: 5s
@@ -141,8 +142,31 @@ Listen addresses are read at startup. They are not changed by a config reload; t
 |-------|---------|---------|
 | `log.level` | `info` | Verbosity: `debug`, `info`, `warn`, `error`. `debug` logs each upstream's result every check cycle. |
 | `log.format` | `text` | Output format: `text` or `json`. Logs go to stdout and include a timestamp (`time=` in text, `"time"` in json), so they are suitable for journald. |
+| `log.access` | `false` | If `true`, every finished proxied connection is logged at `info` level as `msg=access` (see "Log messages" below). Can be noisy on busy hosts. |
 
-Log level and format are applied at startup only; a reload does not change them.
+Log level, format and `log.access` are applied at startup only; a reload does not change them.
+
+#### Log messages
+
+Health and switching events are logged without `debug`:
+
+| Message | Level | Meaning |
+|---------|-------|---------|
+| `upstream up` | info | An upstream became healthy |
+| `upstream down` | warn | An upstream was marked down; `errors` lists every failed probe URL as `url: error` |
+| `upstream check failed` | warn | A check cycle failed but the upstream is not yet below `down_threshold` |
+| `active upstream changed` | info | The active upstream changed; fields `from`, `to`, `from_latency_ms` and `reason` |
+| `http connect dial failed`, `http forward failed` | warn | HTTP frontend errors; dial failure warnings include `client` |
+
+`reason` is one of: `initial`, `no healthy upstream`, `pinned`, `previous down`, `better priority tier`, `faster`.
+
+With `log.access: true` every finished connection produces one line:
+
+```
+level=INFO msg=access proto=socks5 client=127.0.0.1:32840 target=github.com:443 upstream=xray-1 sent=780 received=596236 duration_ms=3412
+```
+
+Fields: `proto` (`socks5`, `http-connect` or `http`), `client`, `target`, `upstream`, `sent` (bytes client to target), `received` (bytes target to client), `duration_ms`. Plain `http` entries have `method`, the target URL, `upstream`, `status`, `received` and `duration_ms` instead of `sent`.
 
 ### check
 
@@ -282,7 +306,7 @@ A minimal inbound SOCKS5 server: no authentication, CONNECT command only.
 
 ## 7. Status page and JSON
 
-`http://<listen.status>/` (by default http://127.0.0.1:10802) is an HTML page that refreshes itself every 5 seconds. It shows the SOCKS5 and HTTP addresses and a table with, for each upstream:
+`http://<listen.status>/` (by default http://127.0.0.1:10802) is an HTML page that refreshes itself every 5 seconds. It shows the SOCKS5 and HTTP addresses, the total speed (down/up) of relayed traffic and a table with, for each upstream:
 
 | Column | Meaning |
 |--------|---------|
@@ -293,6 +317,7 @@ A minimal inbound SOCKS5 server: no authentication, CONNECT command only.
 | Health | up or down |
 | Latency | Average latency of successful requests, `-` if not measured |
 | OK/Total | Successful requests out of all check URLs in the last cycle |
+| Speed | Current rate down/up (bytes per second, sampled every 2 s) and total bytes received/sent through the upstream; health-check probes are not counted. Counters reset on SIGHUP reload (upstreams are rebuilt) and on restart |
 | Checked | Time since the last check, `never` if not checked yet; the last error, if any, is shown under this value |
 | Control | "Switch here" button to pin this upstream as active (manual override); shows "pinned" for the currently pinned one |
 
@@ -317,7 +342,11 @@ The buttons use two POST endpoints on the status server: `POST /pin` with the fo
     "CheckedAt": "2025-01-01T12:00:00.123456789+03:00",
     "CheckTotal": 120,
     "CheckFailures": 2,
-    "Active": true
+    "Active": true,
+    "RxBytes": 596236,
+    "TxBytes": 780,
+    "RxRate": 1048576,
+    "TxRate": 2048
   }
 ]
 ```
@@ -337,6 +366,10 @@ The buttons use two POST endpoints on the status server: `POST /pin` with the fo
 | `CheckTotal` | number | Total check cycles run for the upstream |
 | `CheckFailures` | number | Total failed check cycles for the upstream |
 | `Active` | bool | True for the upstream currently in use |
+| `RxBytes` | number | Bytes relayed target to client through the upstream (health probes excluded) |
+| `TxBytes` | number | Bytes relayed client to target through the upstream |
+| `RxRate` | number | Current download rate in bytes per second (sampled every 2 s) |
+| `TxRate` | number | Current upload rate in bytes per second |
 
 Quick query:
 
@@ -359,6 +392,7 @@ curl -s http://127.0.0.1:10802/status.json
 | `balancer_upstream_checks_total` | counter | `name` | Total check cycles run for the upstream |
 | `balancer_upstream_check_failures_total` | counter | `name` | Total failed check cycles for the upstream |
 | `balancer_active_upstream` | gauge | `name` | 1 for the currently active upstream, 0 otherwise |
+| `balancer_upstream_bytes_total` | counter | `name`, `direction` (`rx`, `tx`) | Bytes relayed through the upstream: `rx` target to client, `tx` client to target; health probes not counted; resets on reload and restart |
 
 Example Prometheus scrape config:
 

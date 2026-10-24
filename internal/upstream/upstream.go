@@ -33,6 +33,8 @@ type Upstream struct {
 	// Cumulative counters since start (for Prometheus).
 	checkTotal    int64
 	checkFailures int64
+
+	traffic traffic
 }
 
 // Params configures an upstream's selection weight and health hysteresis.
@@ -143,6 +145,10 @@ type Snapshot struct {
 	CheckedAt     time.Time
 	CheckTotal    int64
 	CheckFailures int64
+	RxBytes       int64 // relayed bytes from the upstream since start
+	TxBytes       int64 // relayed bytes to the upstream since start
+	RxRate        int64 // bytes/s from the upstream at the last sample
+	TxRate        int64 // bytes/s to the upstream at the last sample
 }
 
 func (u *Upstream) Snapshot() Snapshot {
@@ -161,6 +167,10 @@ func (u *Upstream) Snapshot() Snapshot {
 		CheckedAt:     u.checkedAt,
 		CheckTotal:    u.checkTotal,
 		CheckFailures: u.checkFailures,
+		RxBytes:       u.traffic.rx.Load(),
+		TxBytes:       u.traffic.tx.Load(),
+		RxRate:        u.traffic.rxRate.Load(),
+		TxRate:        u.traffic.txRate.Load(),
 	}
 }
 

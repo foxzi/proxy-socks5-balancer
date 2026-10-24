@@ -18,7 +18,7 @@ Example configs: [examples/](examples/) | Changes: [CHANGELOG.md](CHANGELOG.md)
 - Upstream `priority` tiers (lower wins, higher tiers are standby) and `weight` to prefer faster-looking upstreams within a tier.
 - Hysteresis: configurable `up_threshold` / `down_threshold` (defaults: fast cold start, marked down after 2 consecutive failed cycles) and optional latency smoothing (`latency_ewma`).
 - Passive health: a failed dial through the active upstream triggers an immediate re-check.
-- Status web page (auto-refresh every 5 s), `/status.json`, Prometheus `/metrics` and `/healthz`.
+- Status web page (auto-refresh every 5 s) with per-upstream traffic speed and byte counters, `/status.json`, Prometheus `/metrics` and `/healthz`.
 - Live config reload on SIGHUP without restarting the listeners; graceful shutdown on SIGINT/SIGTERM.
 
 ## How it works
@@ -124,6 +124,7 @@ Packaging layout is defined in `nfpm.yaml`; maintainer scripts live in `deploy/s
 | `listen.status` | `127.0.0.1:10802` | Status page address |
 | `log.level` | `info` | Log verbosity: debug, info, warn, error |
 | `log.format` | `text` | Log format: text or json (stdout, journald-friendly) |
+| `log.access` | `false` | Log every finished proxied connection at info level (`msg=access`); applied on restart only, can be noisy on busy hosts |
 | `check.interval` | `15s` | Time between check cycles |
 | `check.timeout` | `5s` | Timeout of each check request |
 | `check.required` | `1` | Minimum number of check URLs that must succeed (HTTP status < 400) |
@@ -145,7 +146,7 @@ Validation fails on: no upstreams, no check URLs, `required` greater than the nu
 
 ## Status page
 
-`http://<listen.status>/` shows, for each upstream: name, address, priority/weight, health (up/down), latency, ok/total, last check time and last error, and marks the active upstream. `http://<listen.status>/status.json` returns the same data as JSON.
+`http://<listen.status>/` shows, for each upstream: name, address, priority/weight, health (up/down), latency, ok/total, traffic speed (down/up and total bytes), last check time and last error, and marks the active upstream. The header also shows the total speed. `http://<listen.status>/status.json` returns the same data as JSON.
 
 Each row has a **Switch here** button that pins the active upstream to that proxy (manual override), disabling automatic selection. A banner at the top shows the current pin and a **Back to auto** button restores automatic selection. The pin is kept by name, so it survives a config reload; if the pinned upstream goes down, traffic temporarily falls back to the best healthy proxy and the pin resumes once it recovers. A manual switch fires the `on_switch` hook just like an automatic one.
 
@@ -154,7 +155,7 @@ The status server also exposes:
 - `POST /pin` (form field `name`): pin the active upstream to the named proxy. Used by the status page button.
 - `POST /auto`: clear the pin and return to automatic selection.
 
-- `GET /metrics`: Prometheus text-format metrics, e.g. `balancer_upstream_up{name="xray-1"}` (1 healthy / 0 down), `balancer_upstream_latency_ms{name="xray-1"}`, `balancer_frontend_connections_total{frontend="socks5"}`, `balancer_frontend_dial_errors_total`.
+- `GET /metrics`: Prometheus text-format metrics, e.g. `balancer_upstream_up{name="xray-1"}` (1 healthy / 0 down), `balancer_upstream_latency_ms{name="xray-1"}`, `balancer_frontend_connections_total{frontend="socks5"}`, `balancer_frontend_dial_errors_total`, `balancer_upstream_bytes_total{name="xray-1",direction="rx"}`.
 - `GET /healthz`: 200 (body starts with `ok`) when at least one upstream is healthy, otherwise 503. Useful for load balancers, systemd and monitoring.
 
 ## Config reload
@@ -177,7 +178,7 @@ on_switch:
 
 ## Logging
 
-Logs are structured (Go `slog`) and written to stdout, so journald captures them directly. `log.level` is `debug|info|warn|error`; `debug` adds a line per upstream per check cycle. `log.format` is `text` or `json`.
+Logs are structured (Go `slog`) and written to stdout, so journald captures them directly. `log.level` is `debug|info|warn|error`; `debug` adds a line per upstream per check cycle. `log.format` is `text` or `json`. Health transitions (`upstream up`, `upstream down`, `upstream check failed`) and `active upstream changed` (with `reason`) are logged at info/warn. With `log.access: true` every finished connection is logged as `msg=access` (proto, client, target, upstream, sent, received, duration_ms). See [docs/en.md](docs/en.md) for details.
 
 ## Project layout
 

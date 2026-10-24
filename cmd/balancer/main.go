@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"proxy-socks5-balancer/internal/checker"
 	"proxy-socks5-balancer/internal/config"
@@ -64,16 +65,17 @@ func main() {
 			chk.Trigger()
 			return nil, err
 		}
-		return conn, nil
+		return cur.Track(conn), nil
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go chk.Run(ctx)
+	go sampleTraffic(ctx, sel)
 
-	socks := &frontend.SOCKS5{Addr: cfg.Listen.SOCKS5, Dial: dial, Metrics: mx}
-	httpProxy := &frontend.HTTPProxy{Addr: cfg.Listen.HTTP, Dial: dial, Metrics: mx}
+	socks := &frontend.SOCKS5{Addr: cfg.Listen.SOCKS5, Dial: dial, Metrics: mx, AccessLog: cfg.Log.Access}
+	httpProxy := &frontend.HTTPProxy{Addr: cfg.Listen.HTTP, Dial: dial, Metrics: mx, AccessLog: cfg.Log.Access}
 	statusSrv := &status.Server{Addr: cfg.Listen.Status, Sel: sel, Metrics: mx}
 	statusSrv.Listen.SOCKS5 = cfg.Listen.SOCKS5
 	statusSrv.Listen.HTTP = cfg.Listen.HTTP
@@ -156,6 +158,23 @@ func checkSettings(cfg *config.Config) checker.Settings {
 		Timeout:  cfg.Check.Timeout.Std(),
 		Required: cfg.Check.Required,
 		URLs:     cfg.Check.URLs,
+	}
+}
+
+// sampleTraffic refreshes the per-upstream transfer rate shown on the status
+// page every couple of seconds.
+func sampleTraffic(ctx context.Context, sel *selector.Selector) {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			for _, u := range sel.Upstreams() {
+				u.SampleRate(now)
+			}
+		}
 	}
 }
 

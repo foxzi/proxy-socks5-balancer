@@ -16,9 +16,10 @@ import (
 // SOCKS5 is a minimal inbound SOCKS5 server (no auth, CONNECT only).
 // It forwards every accepted connection through the selected upstream.
 type SOCKS5 struct {
-	Addr    string
-	Dial    DialFunc
-	Metrics *metrics.Metrics
+	Addr      string
+	Dial      DialFunc
+	Metrics   *metrics.Metrics
+	AccessLog bool // log every finished connection at info level
 }
 
 func (s *SOCKS5) ListenAndServe(ctx context.Context) error {
@@ -59,12 +60,13 @@ func (s *SOCKS5) handle(conn net.Conn) {
 		return
 	}
 
+	start := time.Now()
 	up, err := dialTimeout(s.Dial, "tcp", target, 15*time.Second)
 	if err != nil {
 		s.Metrics.DialError()
 		// reply: general failure
 		conn.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
-		slog.Warn("socks5 dial failed", "target", target, "err", err)
+		slog.Warn("socks5 dial failed", "client", conn.RemoteAddr().String(), "target", target, "err", err)
 		return
 	}
 	defer up.Close()
@@ -75,7 +77,11 @@ func (s *SOCKS5) handle(conn net.Conn) {
 	}
 
 	conn.SetDeadline(time.Time{})
-	pipe(conn, up)
+	sent, received := pipe(conn, up)
+	if s.AccessLog {
+		access{proto: "socks5", client: conn.RemoteAddr().String(), target: target,
+			upstream: upstreamName(up), sent: sent, received: received, start: start}.log()
+	}
 }
 
 // handshake handles the SOCKS5 method negotiation (no-auth only).

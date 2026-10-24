@@ -14,9 +14,10 @@ import (
 // HTTPProxy is an inbound HTTP proxy supporting CONNECT (tunnel) and plain
 // HTTP forwarding. All traffic goes through the selected upstream.
 type HTTPProxy struct {
-	Addr    string
-	Dial    DialFunc
-	Metrics *metrics.Metrics
+	Addr      string
+	Dial      DialFunc
+	Metrics   *metrics.Metrics
+	AccessLog bool // log every finished request/tunnel at info level
 }
 
 func (p *HTTPProxy) ListenAndServe(ctx context.Context) error {
@@ -54,9 +55,11 @@ func (p *HTTPProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleConnect tunnels raw bytes through the upstream (used for HTTPS).
 func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	up, err := dialTimeout(p.Dial, "tcp", r.Host, 15*time.Second)
 	if err != nil {
 		p.Metrics.DialError()
+		slog.Warn("http connect dial failed", "client", r.RemoteAddr, "target", r.Host, "err", err)
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return
 	}
@@ -72,13 +75,25 @@ func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
-	pipe(client, up)
+	sent, received := pipe(client, up)
+	if p.AccessLog {
+		access{proto: "http-connect", client: r.RemoteAddr, target: r.Host,
+			upstream: upstreamName(up), sent: sent, received: received, start: start}.log()
+	}
 }
 
 // handleHTTP forwards a plain HTTP request through the upstream.
 func (p *HTTPProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	var upName string
 	transport := &http.Transport{
-		DialContext:       p.Dial,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := p.Dial(ctx, network, addr)
+			if err == nil {
+				upName = upstreamName(c)
+			}
+			return c, err
+		},
 		DisableKeepAlives: true,
 	}
 	outReq := r.Clone(r.Context())
@@ -88,6 +103,7 @@ func (p *HTTPProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := transport.RoundTrip(outReq)
 	if err != nil {
 		p.Metrics.DialError()
+		slog.Warn("http forward failed", "client", r.RemoteAddr, "target", r.Host, "err", err)
 		http.Error(w, "upstream error", http.StatusBadGateway)
 		return
 	}
@@ -100,7 +116,12 @@ func (p *HTTPProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	received, _ := io.Copy(w, resp.Body)
+	if p.AccessLog {
+		slog.Info("access", "proto", "http", "client", r.RemoteAddr, "method", r.Method,
+			"target", r.URL.String(), "upstream", upName, "status", resp.StatusCode,
+			"received", received, "duration_ms", time.Since(start).Milliseconds())
+	}
 }
 
 // hopByHop headers must not be forwarded by a proxy.

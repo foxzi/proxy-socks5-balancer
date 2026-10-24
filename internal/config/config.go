@@ -57,6 +57,7 @@ type Upstream struct {
 type Log struct {
 	Level  string `yaml:"level"`  // debug|info|warn|error
 	Format string `yaml:"format"` // text|json
+	Access bool   `yaml:"access"` // log every proxied connection (access log)
 }
 
 // Hook is a command executed when the active upstream changes.
